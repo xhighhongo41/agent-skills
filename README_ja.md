@@ -222,6 +222,16 @@ metadata:
 リポジトリ自体のバージョンはこれとは別で、直下の `VERSION` ファイルとリリースタグで
 表現します。Claude Code のプラグインが表示するのはこちらの番号です。
 
+## 変更履歴
+
+| バージョン | 変更内容 |
+|---|---|
+| **1.0.0** | 公式導入経路のマニフェストを追加。OpenCode の `skills.urls` と Claude Code の plugin marketplace の両方を実機で検証済み（従来からの Codex `skill-installer` 経路と併せて3経路）。導入状況の一覧と更新を行う `skill-sync` スキルを追加。 |
+| 0.1.0 | 最初の収集。4スキルを1つのリポジトリにまとめ、規約・バージョン・CI 検証を統一。プレリリースのため手動コピーのみ。 |
+
+各リリースの詳細は
+[リリースページ](https://github.com/xhighhongo41/agent-skills/releases)にあります。
+
 ## ライセンス
 
 [MIT](LICENSE)

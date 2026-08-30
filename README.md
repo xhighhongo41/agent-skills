@@ -228,6 +228,16 @@ major, a new step bumps the minor, wording fixes bump the patch.
 The repository itself is versioned separately, in the top-level `VERSION` file
 and in the release tags. That is the number the Claude Code plugin reports.
 
+## Changelog
+
+| Version | What changed |
+|---|---|
+| **1.0.0** | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
+| 0.1.0 | First collection: four skills gathered into one repository with unified conventions, versions and CI validation. Pre-release; manual copy only. |
+
+Each release's full notes are on the
+[releases page](https://github.com/xhighhongo41/agent-skills/releases).
+
 ## License
 
 [MIT](LICENSE)
