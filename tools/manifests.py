@@ -56,8 +56,14 @@ MARKETPLACE_RELPATH = Path(".claude-plugin") / "marketplace.json"
 #: letting a stale value mask the real project version.
 PLUGIN_JSON_RELPATH = Path(".claude-plugin") / "plugin.json"
 
-#: Marketplace identifier used in ``/plugin marketplace add <owner>/<repo>``.
-MARKETPLACE_NAME = "agent-skills"
+#: Marketplace identifier, which users see in ``/plugin marketplace update``.
+#:
+#: It is deliberately prefixed with the owner rather than being the bare
+#: repository name: Claude Code reserves ``agent-skills`` for official Anthropic
+#: marketplaces and refuses to add a third-party marketplace that claims it.  The
+#: reservation is on the exact name only, and it does not apply to the plugin
+#: name below.
+MARKETPLACE_NAME = "xhighhongo41-agent-skills"
 
 #: Owner of the public repository.  The schema requires ``owner`` to be a
 #: mapping whose ``name`` is mandatory, so this value is nested rather than used
