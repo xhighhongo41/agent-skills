@@ -1,0 +1,4 @@
+interface:
+  display_name: "バージョン実装進行"
+  short_description: "確定済み実装計画に沿って実装完了まで自律進行"
+  default_prompt: "$version-implement を使って、指定バージョンの実装を計画確定から完了まで進めてください。"

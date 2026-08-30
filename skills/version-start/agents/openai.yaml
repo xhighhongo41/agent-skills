@@ -1,0 +1,4 @@
+interface:
+  display_name: "バージョン開発開始"
+  short_description: "新バージョンの設計と実装計画を準備"
+  default_prompt: "$version-start を使って、指定バージョンの設計と実装計画を準備してください。"

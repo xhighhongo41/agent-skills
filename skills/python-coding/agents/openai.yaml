@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python コーディング"
+  short_description: "Python実装の品質と一貫性を高める指針"
+  default_prompt: "$python-coding を使って、このPythonコードを実装・レビューしてください。"

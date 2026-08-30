@@ -1,0 +1,10 @@
+PROJECT.md
+開発資料
+開発資料/*
+開発資料/**/*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

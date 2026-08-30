@@ -1,0 +1,4 @@
+interface:
+  display_name: "バージョンリリース"
+  short_description: "検証からタグ付与までのリリース手順を実行"
+  default_prompt: "$version-release を使って、指定バージョンのリリース手順を実行してください。"
