@@ -46,9 +46,6 @@ ALLOWED_FRONTMATTER_KEYS = frozenset(
     {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 )
 
-#: Frontmatter keys this project always requires.
-REQUIRED_FRONTMATTER_KEYS = ("name", "description", "license")
-
 #: Skill names are lowercase alphanumerics joined by single hyphens.
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -89,8 +86,13 @@ DENYLIST: tuple[str, ...] = (
     "Explore",
     # Agent-specific configuration paths.
     ".claude/agents",
-    # Private project names and personal identifiers.
+    # Unrelated private project names.
+    # Absolute home directory paths, which would leak a local account name.
+    # The path prefixes are matched rather than any specific user name, so this
+    # list itself stays free of personal information.
     "/Users/",
+    "/home/",
+    "C:\\Users\\",
     # Product-flavoured usage declarations left over from the per-agent copies.
     "OpenCode用",
     "Claude用",
@@ -150,17 +152,22 @@ class SkillDoc:
     @property
     def body(self) -> str:
         """Return the body as a single string."""
-        raise NotImplementedError
+        return "\n".join(self.body_lines)
 
     @property
     def declared_name(self) -> str | None:
         """Return the frontmatter ``name`` when it is a string, otherwise ``None``."""
-        raise NotImplementedError
+        name = self.frontmatter.get("name")
+        return name if isinstance(name, str) else None
 
     @property
     def declared_version(self) -> str | None:
         """Return ``metadata.version`` when it is a string, otherwise ``None``."""
-        raise NotImplementedError
+        metadata = self.frontmatter.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        version = metadata.get("version")
+        return version if isinstance(version, str) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -180,7 +187,12 @@ def discover_skill_dirs(skills_root: Path) -> list[Path]:
     Returns:
         Sorted list of skill folder paths. Empty when ``skills_root`` is missing.
     """
-    raise NotImplementedError
+    if not skills_root.is_dir():
+        return []
+    return sorted(
+        (entry for entry in skills_root.iterdir() if entry.is_dir()),
+        key=lambda entry: entry.name,
+    )
 
 
 def split_frontmatter(text: str) -> tuple[list[str], list[str], int] | None:
@@ -197,7 +209,24 @@ def split_frontmatter(text: str) -> tuple[list[str], list[str], int] | None:
         A tuple of (frontmatter lines, body lines, 1-indexed body start line), or
         ``None`` when the file has no well-formed frontmatter block.
     """
-    raise NotImplementedError
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return None
+
+    closing_index = None
+    for index in range(1, len(lines)):
+        if lines[index] == "---":
+            closing_index = index
+            break
+    if closing_index is None:
+        return None
+
+    frontmatter_lines = lines[1:closing_index]
+    body_lines = lines[closing_index + 1 :]
+    # ``closing_index`` is the 0-indexed position of the closing marker, so the
+    # first body line sits two lines further along in 1-indexed terms.
+    body_start_line = closing_index + 2
+    return frontmatter_lines, body_lines, body_start_line
 
 
 def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[Violation]]:
@@ -214,7 +243,52 @@ def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[
     Returns:
         A tuple of (parsed document or ``None``, violations found while parsing).
     """
-    raise NotImplementedError
+    skill_path = skill_dir / SKILL_FILENAME
+    rel_path = str(skill_path.relative_to(repo_root))
+
+    if not skill_path.is_file():
+        return None, [Violation(rel_path, None, "V01", f"{SKILL_FILENAME} is missing.")]
+
+    text = skill_path.read_text(encoding="utf-8")
+    split = split_frontmatter(text)
+    if split is None:
+        return None, [
+            Violation(
+                rel_path,
+                None,
+                "V02",
+                "File does not start with a '---' frontmatter block, or the "
+                "block is never closed.",
+            )
+        ]
+
+    frontmatter_lines, body_lines, body_start_line = split
+    frontmatter_source = "\n".join(frontmatter_lines)
+    try:
+        # ``yaml.safe_load`` (never ``yaml.load``) avoids constructing arbitrary
+        # Python objects from untrusted skill content.
+        frontmatter = yaml.safe_load(frontmatter_source)
+    except yaml.YAMLError as exc:
+        return None, [
+            Violation(rel_path, None, "V02", f"Frontmatter is not valid YAML: {exc}")
+        ]
+
+    if not isinstance(frontmatter, dict):
+        return None, [
+            Violation(rel_path, None, "V02", "Frontmatter must parse to a mapping.")
+        ]
+
+    doc = SkillDoc(
+        directory=skill_dir,
+        skill_path=skill_path,
+        rel_path=rel_path,
+        frontmatter=frontmatter,
+        frontmatter_lines=frontmatter_lines,
+        frontmatter_start_line=1,
+        body_lines=body_lines,
+        body_start_line=body_start_line,
+    )
+    return doc, []
 
 
 # --------------------------------------------------------------------------- #
@@ -222,54 +296,331 @@ def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[
 # --------------------------------------------------------------------------- #
 
 
+def _find_frontmatter_line(doc: SkillDoc, prefix: str) -> int | None:
+    """Return the 1-indexed line of the first frontmatter line starting with ``prefix``.
+
+    This is a best-effort lookup used to make violation reports more precise; it
+    is not required for the checks themselves to be correct, so it returns
+    ``None`` (rather than raising) when no matching line is found.
+    """
+    for offset, line in enumerate(doc.frontmatter_lines):
+        if line.strip().startswith(prefix):
+            return doc.frontmatter_start_line + 1 + offset
+    return None
+
+
+def _is_description_quoted(doc: SkillDoc) -> bool:
+    """Return whether the raw ``description:`` line double-quotes its value."""
+    for line in doc.frontmatter_lines:
+        stripped = line.strip()
+        if stripped.startswith("description:"):
+            value = stripped[len("description:") :].strip()
+            return len(value) >= 2 and value.startswith('"') and value.endswith('"')
+    return False
+
+
 def check_frontmatter_keys(doc: SkillDoc) -> list[Violation]:
     """V03: every frontmatter key belongs to the Agent Skills standard set."""
-    raise NotImplementedError
+    violations = []
+    for key in doc.frontmatter:
+        if key not in ALLOWED_FRONTMATTER_KEYS:
+            line = _find_frontmatter_line(doc, f"{key}:")
+            violations.append(
+                Violation(
+                    doc.rel_path,
+                    line,
+                    "V03",
+                    f"Frontmatter key {key!r} is outside the allowed set "
+                    f"{sorted(ALLOWED_FRONTMATTER_KEYS)}.",
+                )
+            )
+    return violations
 
 
 def check_name(doc: SkillDoc) -> list[Violation]:
     """V04: ``name`` is present, well formed, short enough and matches the folder."""
-    raise NotImplementedError
+    line = _find_frontmatter_line(doc, "name:")
+    name = doc.frontmatter.get("name")
+    if not isinstance(name, str) or not name:
+        return [Violation(doc.rel_path, line, "V04", "Frontmatter is missing a 'name' string.")]
+
+    violations = []
+    if not NAME_PATTERN.match(name):
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V04",
+                f"Name {name!r} must be lowercase alphanumerics joined by single hyphens.",
+            )
+        )
+    if len(name) > MAX_NAME_CHARS:
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V04",
+                f"Name is {len(name)} characters, exceeding the {MAX_NAME_CHARS}-character limit.",
+            )
+        )
+    if name != doc.directory.name:
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V04",
+                f"Name {name!r} does not match the folder name {doc.directory.name!r}.",
+            )
+        )
+    return violations
 
 
 def check_description(doc: SkillDoc) -> list[Violation]:
     """V05: ``description`` is present, within budget and double-quoted in source."""
-    raise NotImplementedError
+    line = _find_frontmatter_line(doc, "description:")
+    description = doc.frontmatter.get("description")
+    if not isinstance(description, str) or not description:
+        return [
+            Violation(
+                doc.rel_path,
+                line,
+                "V05",
+                "Frontmatter is missing a non-empty 'description' string.",
+            )
+        ]
+
+    violations = []
+    if len(description) > MAX_DESCRIPTION_CHARS:
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V05",
+                f"Description is {len(description)} characters, exceeding the "
+                f"{MAX_DESCRIPTION_CHARS}-character limit.",
+            )
+        )
+    if not _is_description_quoted(doc):
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V05",
+                "Description must be double-quoted in the frontmatter source.",
+            )
+        )
+    return violations
 
 
 def check_license(doc: SkillDoc) -> list[Violation]:
     """V06: ``license`` is ``MIT``."""
-    raise NotImplementedError
+    license_value = doc.frontmatter.get("license")
+    if license_value == REQUIRED_LICENSE:
+        return []
+    line = _find_frontmatter_line(doc, "license:")
+    return [
+        Violation(
+            doc.rel_path,
+            line,
+            "V06",
+            f"License must be {REQUIRED_LICENSE!r}, found {license_value!r}.",
+        )
+    ]
 
 
 def check_version(doc: SkillDoc) -> list[Violation]:
     """V07: ``metadata.version`` is a semver string."""
-    raise NotImplementedError
+    line = _find_frontmatter_line(doc, "metadata:")
+    metadata = doc.frontmatter.get("metadata")
+    if metadata is None:
+        return [
+            Violation(doc.rel_path, line, "V07", "Frontmatter is missing a 'metadata' mapping.")
+        ]
+    if not isinstance(metadata, dict):
+        return [Violation(doc.rel_path, line, "V07", "'metadata' must be a mapping.")]
+    if "version" not in metadata:
+        return [Violation(doc.rel_path, line, "V07", "'metadata' is missing a 'version' key.")]
+
+    version = metadata["version"]
+    if not isinstance(version, str):
+        return [
+            Violation(
+                doc.rel_path,
+                line,
+                "V07",
+                f"'metadata.version' must be a string, found {type(version).__name__}.",
+            )
+        ]
+    if not VERSION_PATTERN.match(version):
+        return [
+            Violation(
+                doc.rel_path,
+                line,
+                "V07",
+                f"'metadata.version' {version!r} does not match x.y.z.",
+            )
+        ]
+    return []
 
 
 def check_body_length(doc: SkillDoc) -> list[Violation]:
     """V08: the body stays within the recommended line budget."""
-    raise NotImplementedError
+    if len(doc.body_lines) <= MAX_BODY_LINES:
+        return []
+    return [
+        Violation(
+            doc.rel_path,
+            None,
+            "V08",
+            f"Body has {len(doc.body_lines)} lines, exceeding the {MAX_BODY_LINES}-line budget.",
+        )
+    ]
 
 
 def check_version_marker(doc: SkillDoc) -> list[Violation]:
     """V09: exactly one version marker exists and agrees with ``metadata.version``."""
-    raise NotImplementedError
+    matches: list[tuple[int, str]] = []
+    for offset, line in enumerate(doc.body_lines):
+        match = VERSION_MARKER_PATTERN.match(line)
+        if match:
+            matches.append((doc.body_start_line + offset, match.group(1)))
+
+    if len(matches) != 1:
+        return [
+            Violation(
+                doc.rel_path,
+                None,
+                "V09",
+                f"Expected exactly one '**skill version**' marker, found {len(matches)}.",
+            )
+        ]
+
+    marker_line, marker_version = matches[0]
+    declared_version = doc.declared_version
+    if declared_version is not None and marker_version != declared_version:
+        return [
+            Violation(
+                doc.rel_path,
+                marker_line,
+                "V09",
+                f"Version marker {marker_version!r} does not match "
+                f"metadata.version {declared_version!r}.",
+            )
+        ]
+    return []
 
 
 def check_usage_declaration(doc: SkillDoc) -> list[Violation]:
     """V10: the body instructs the agent to announce the skill name and version."""
-    raise NotImplementedError
+    name = doc.declared_name
+    version = doc.declared_version
+    if name is None or version is None:
+        return [
+            Violation(
+                doc.rel_path,
+                None,
+                "V10",
+                "Cannot verify the usage declaration without a valid name and version.",
+            )
+        ]
+
+    expected = f"{name} スキル v{version} を使用します"
+    if expected in doc.body:
+        return []
+    return [
+        Violation(
+            doc.rel_path,
+            None,
+            "V10",
+            f"Body must declare {expected!r} on first use.",
+        )
+    ]
 
 
 def check_denylist(doc: SkillDoc) -> list[Violation]:
     """V11: no agent-specific proper noun, private name or personal path remains."""
-    raise NotImplementedError
+    violations = []
+    for term in DENYLIST:
+        line = None
+        for offset, source_line in enumerate(doc.frontmatter_lines):
+            if term in source_line:
+                line = doc.frontmatter_start_line + 1 + offset
+                break
+        if line is None:
+            for offset, source_line in enumerate(doc.body_lines):
+                if term in source_line:
+                    line = doc.body_start_line + offset
+                    break
+        if line is not None:
+            violations.append(
+                Violation(doc.rel_path, line, "V11", f"Denylisted term {term!r} found.")
+            )
+    return violations
 
 
 def check_openai_yaml(doc: SkillDoc, repo_root: Path) -> list[Violation]:
     """V12: the Codex UI metadata file exists and carries usable interface fields."""
-    raise NotImplementedError
+    yaml_path = doc.directory / OPENAI_YAML_RELPATH
+    rel_path = str(yaml_path.relative_to(repo_root))
+
+    if not yaml_path.is_file():
+        return [Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} is missing.")]
+
+    try:
+        # ``yaml.safe_load`` (never ``yaml.load``) avoids constructing arbitrary
+        # Python objects from untrusted skill content.
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        return [
+            Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} is not valid YAML: {exc}")
+        ]
+
+    if not isinstance(data, dict):
+        return [
+            Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} must parse to a mapping.")
+        ]
+
+    interface = data.get("interface")
+    if not isinstance(interface, dict):
+        return [Violation(rel_path, None, "V12", "'interface' must be a mapping.")]
+
+    violations = []
+    for key in ("display_name", "short_description", "default_prompt"):
+        if key not in interface:
+            violations.append(Violation(rel_path, None, "V12", f"'interface.{key}' is missing."))
+    if violations:
+        return violations
+
+    name = doc.declared_name
+    default_prompt = interface["default_prompt"]
+    if not isinstance(default_prompt, str) or (
+        name is not None and f"${name}" not in default_prompt
+    ):
+        violations.append(
+            Violation(
+                rel_path,
+                None,
+                "V12",
+                f"'interface.default_prompt' must reference the skill name as '${name}'.",
+            )
+        )
+
+    short_description = interface["short_description"]
+    too_long = (
+        not isinstance(short_description, str)
+        or len(short_description) > MAX_SHORT_DESCRIPTION_CHARS
+    )
+    if too_long:
+        violations.append(
+            Violation(
+                rel_path,
+                None,
+                "V12",
+                "'interface.short_description' is longer than "
+                f"{MAX_SHORT_DESCRIPTION_CHARS} characters.",
+            )
+        )
+    return violations
 
 
 # --------------------------------------------------------------------------- #
@@ -287,26 +638,66 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
     Returns:
         All violations found, in check order.
     """
-    raise NotImplementedError
+    doc, violations = load_skill(skill_dir, repo_root)
+    if doc is None:
+        return violations
+
+    violations = list(violations)
+    violations.extend(check_frontmatter_keys(doc))
+    violations.extend(check_name(doc))
+    violations.extend(check_description(doc))
+    violations.extend(check_license(doc))
+    violations.extend(check_version(doc))
+    violations.extend(check_body_length(doc))
+    violations.extend(check_version_marker(doc))
+    violations.extend(check_usage_declaration(doc))
+    violations.extend(check_denylist(doc))
+    violations.extend(check_openai_yaml(doc, repo_root))
+    return violations
 
 
 def validate_repository(repo_root: Path, min_skills: int = 1) -> list[Violation]:
     """Validate every skill in the repository.
 
+    Implements check ``V00``: ``skills/`` exists and holds at least ``min_skills``
+    skill folders. The release gate raises ``min_skills`` to the number of skills
+    the version ships, which turns "all expected skills are present" into a
+    machine-checked requirement rather than a manual count.
+
     Args:
         repo_root: Repository root (the directory containing ``skills/``).
-        min_skills: Minimum number of skill folders that must be present. The
-            release gate raises this to the number of skills the version ships.
+        min_skills: Minimum number of skill folders that must be present.
 
     Returns:
-        All violations found across the repository.
+        All violations found across the repository, with any ``V00`` violation
+        first, followed by per-skill violations in skill-name order.
     """
-    raise NotImplementedError
+    skills_root = repo_root / SKILLS_DIRNAME
+    skill_dirs = discover_skill_dirs(skills_root)
+
+    violations: list[Violation] = []
+    if len(skill_dirs) < min_skills:
+        violations.append(
+            Violation(
+                SKILLS_DIRNAME,
+                None,
+                "V00",
+                f"Expected at least {min_skills} skill folder(s) under "
+                f"{SKILLS_DIRNAME!r}, found {len(skill_dirs)}.",
+            )
+        )
+
+    # ``discover_skill_dirs`` already sorts by name, so skills are validated
+    # (and their violations reported) in a stable, deterministic order.
+    for skill_dir in skill_dirs:
+        violations.extend(validate_skill(skill_dir, repo_root))
+    return violations
 
 
 def format_violation(violation: Violation) -> str:
     """Render a violation as ``path:line: CHECK: message``."""
-    raise NotImplementedError
+    line = "-" if violation.line is None else str(violation.line)
+    return f"{violation.path}:{line}: {violation.check}: {violation.message}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -318,7 +709,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns:
         0 when no violation was found, 1 otherwise.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--min-skills",
+        type=int,
+        default=1,
+        help="Minimum number of skill folders required under skills/.",
+    )
+    args = parser.parse_args(argv)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    violations = validate_repository(repo_root, min_skills=args.min_skills)
+
+    for violation in violations:
+        print(format_violation(violation))
+
+    if violations:
+        return 1
+
+    print("All skills passed validation.")
+    return 0
 
 
 if __name__ == "__main__":
