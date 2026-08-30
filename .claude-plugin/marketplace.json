@@ -1,0 +1,14 @@
+{
+  "name": "agent-skills",
+  "owner": {
+    "name": "xhighhongo41"
+  },
+  "plugins": [
+    {
+      "name": "agent-skills",
+      "source": "./",
+      "description": "Agent Skills for coding agents, kept in one place.",
+      "version": "1.0.0"
+    }
+  ]
+}
