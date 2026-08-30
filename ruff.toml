@@ -1,0 +1,10 @@
+# Lint and format settings for the repository's CI helper scripts.
+#
+# `tools/check.sh` and the GitHub Actions workflow both read this file, so the
+# same command gives the same answer locally and in CI.
+#
+# The line length matches what the existing sources were written to; the target
+# version matches the interpreter the workflow installs.
+
+line-length = 100
+target-version = "py312"

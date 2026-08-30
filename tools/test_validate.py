@@ -298,13 +298,7 @@ def test_v02_frontmatter_not_a_mapping_is_violation(tmp_path: Path) -> None:
     """A frontmatter block that parses to a list rather than a mapping is V02."""
     skill_dir = write_skill(
         tmp_path,
-        raw_content=(
-            "---\n"
-            "- name: sample-skill\n"
-            "- description: not-a-mapping\n"
-            "---\n"
-            "\n# 本文\n"
-        ),
+        raw_content=("---\n- name: sample-skill\n- description: not-a-mapping\n---\n\n# 本文\n"),
     )
     violations = validate_skill(skill_dir, tmp_path)
     assert "V02" in _check_ids(violations)
@@ -463,9 +457,7 @@ def test_v07_metadata_missing_is_violation(tmp_path: Path) -> None:
 
 def test_v07_metadata_not_a_mapping_is_violation(tmp_path: Path) -> None:
     """A ``metadata`` value that is not a mapping is reported as V07."""
-    skill_dir = write_skill(
-        tmp_path, metadata_raw='metadata: "1.0.0"', version=DEFAULT_VERSION
-    )
+    skill_dir = write_skill(tmp_path, metadata_raw='metadata: "1.0.0"', version=DEFAULT_VERSION)
     violations = validate_skill(skill_dir, tmp_path)
     assert "V07" in _check_ids(violations)
 
@@ -585,27 +577,21 @@ def test_v11_body_without_denylisted_terms_is_valid(tmp_path: Path) -> None:
 
 def test_v11_subagent_name_is_violation(tmp_path: Path) -> None:
     """A subagent proper name (e.g. ``code-implementer``) is reported as V11."""
-    skill_dir = write_skill(
-        tmp_path, denylist_word="code-implementer サブエージェントを呼び出す。"
-    )
+    skill_dir = write_skill(tmp_path, denylist_word="code-implementer サブエージェントを呼び出す。")
     violations = validate_skill(skill_dir, tmp_path)
     assert "V11" in _check_ids(violations)
 
 
 def test_v11_claude_agents_config_path_is_violation(tmp_path: Path) -> None:
     """The agent-specific config path ``.claude/agents`` is reported as V11."""
-    skill_dir = write_skill(
-        tmp_path, denylist_word=".claude/agents 配下の定義を参照する。"
-    )
+    skill_dir = write_skill(tmp_path, denylist_word=".claude/agents 配下の定義を参照する。")
     violations = validate_skill(skill_dir, tmp_path)
     assert "V11" in _check_ids(violations)
 
 
 def test_v11_personal_home_path_is_violation(tmp_path: Path) -> None:
     """A personal filesystem path (``/Users/``) is reported as V11."""
-    skill_dir = write_skill(
-        tmp_path, denylist_word="/Users/example/project を参照する。"
-    )
+    skill_dir = write_skill(tmp_path, denylist_word="/Users/example/project を参照する。")
     violations = validate_skill(skill_dir, tmp_path)
     assert "V11" in _check_ids(violations)
 

@@ -256,8 +256,7 @@ def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[
                 rel_path,
                 None,
                 "V02",
-                "File does not start with a '---' frontmatter block, or the "
-                "block is never closed.",
+                "File does not start with a '---' frontmatter block, or the block is never closed.",
             )
         ]
 
@@ -268,14 +267,10 @@ def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[
         # Python objects from untrusted skill content.
         frontmatter = yaml.safe_load(frontmatter_source)
     except yaml.YAMLError as exc:
-        return None, [
-            Violation(rel_path, None, "V02", f"Frontmatter is not valid YAML: {exc}")
-        ]
+        return None, [Violation(rel_path, None, "V02", f"Frontmatter is not valid YAML: {exc}")]
 
     if not isinstance(frontmatter, dict):
-        return None, [
-            Violation(rel_path, None, "V02", "Frontmatter must parse to a mapping.")
-        ]
+        return None, [Violation(rel_path, None, "V02", "Frontmatter must parse to a mapping.")]
 
     doc = SkillDoc(
         directory=skill_dir,
@@ -570,14 +565,10 @@ def check_openai_yaml(doc: SkillDoc, repo_root: Path) -> list[Violation]:
         # Python objects from untrusted skill content.
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        return [
-            Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} is not valid YAML: {exc}")
-        ]
+        return [Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} is not valid YAML: {exc}")]
 
     if not isinstance(data, dict):
-        return [
-            Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} must parse to a mapping.")
-        ]
+        return [Violation(rel_path, None, "V12", f"{OPENAI_YAML_RELPATH} must parse to a mapping.")]
 
     interface = data.get("interface")
     if not isinstance(interface, dict):
