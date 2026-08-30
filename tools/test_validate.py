@@ -7,7 +7,7 @@ below builds a synthetic skill folder under ``tmp_path`` and drives it
 through :func:`validate.validate_skill`, so no test touches the network,
 the user's home directory or this repository's real ``skills/`` folder.
 
-Each test name embeds the check identifier (``V01``..``V12``) it protects,
+Each test name embeds the check identifier (``V00``..``V14``) it protects,
 per the convention documented in ``validate.py``. For every check there is
 at least one "valid" test (a fully compliant skill does not trigger the
 check) and at least one "violation" test (breaking exactly one aspect of an
@@ -16,9 +16,12 @@ otherwise compliant skill triggers the check).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
+import manifests
 import pytest
 from validate import (
     MAX_BODY_LINES,
@@ -26,6 +29,8 @@ from validate import (
     MAX_NAME_CHARS,
     MAX_SHORT_DESCRIPTION_CHARS,
     Violation,
+    check_manifest_drift,
+    check_marketplace_shape,
     validate_repository,
     validate_skill,
 )
@@ -33,6 +38,11 @@ from validate import (
 DEFAULT_NAME = "sample-skill"
 DEFAULT_VERSION = "1.0.0"
 DEFAULT_DESCRIPTION = "サンプルスキルの検証用説明。"
+
+#: Project version written to ``VERSION`` by the manifest fixtures. Kept
+#: different from :data:`DEFAULT_VERSION` so that a test comparing the plugin
+#: entry against ``VERSION`` cannot pass by accidentally matching a skill version.
+DEFAULT_PROJECT_VERSION = "0.1.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -713,3 +723,284 @@ def test_validate_repository_ignores_loose_files_in_skills_dir(tmp_path: Path) -
     (tmp_path / "skills" / "index.json").write_text("{}\n", encoding="utf-8")
     violations = validate_repository(tmp_path, min_skills=1)
     assert violations == []
+
+
+# --------------------------------------------------------------------------- #
+# Manifest helpers (V13/V14)
+# --------------------------------------------------------------------------- #
+
+
+def write_project_version(repo_root: Path, version: str = DEFAULT_PROJECT_VERSION) -> None:
+    """Write the top-level ``VERSION`` file that the manifests are built from."""
+    (repo_root / "VERSION").write_text(f"{version}\n", encoding="utf-8")
+
+
+def build_manifest_repo(
+    tmp_path: Path,
+    *,
+    project_version: str = DEFAULT_PROJECT_VERSION,
+    skill_names: Sequence[str] = ("alpha-skill",),
+) -> Path:
+    """Materialise a synthetic repository whose manifests are freshly generated.
+
+    The result is what a correctly maintained checkout looks like: compliant
+    skills, a ``VERSION`` file and the two manifests exactly as the generator
+    writes them. Tests then break one aspect of it.
+
+    Args:
+        tmp_path: Pytest's per-test temporary directory, used as the repository
+            root so that no test touches a real checkout.
+        project_version: Content of the ``VERSION`` file.
+        skill_names: Names of the skill folders to create.
+
+    Returns:
+        The repository root (``tmp_path``), for readability at the call site.
+    """
+    for skill_name in skill_names:
+        write_skill(tmp_path, name=skill_name)
+    write_project_version(tmp_path, project_version)
+    manifests.write_manifests(tmp_path)
+    return tmp_path
+
+
+def read_marketplace(repo_root: Path) -> dict[str, Any]:
+    """Return the committed marketplace manifest as a Python mapping."""
+    text = (repo_root / manifests.MARKETPLACE_RELPATH).read_text(encoding="utf-8")
+    return json.loads(text)
+
+
+def write_marketplace(repo_root: Path, document: Any) -> None:
+    """Overwrite the committed marketplace manifest with ``document``."""
+    path = repo_root / manifests.MARKETPLACE_RELPATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# V13: skills/index.json matches the generator's output
+# --------------------------------------------------------------------------- #
+
+
+def test_v13_freshly_generated_manifests_are_valid(tmp_path: Path) -> None:
+    """A repository whose manifests were just generated reports no violation."""
+    build_manifest_repo(tmp_path, skill_names=("alpha-skill", "beta-skill"))
+    violations = validate_repository(tmp_path, min_skills=2, verify_manifests=True)
+    assert violations == []
+
+
+def test_v13_edited_index_json_is_violation(tmp_path: Path) -> None:
+    """A hand-edited ``skills/index.json`` is reported as V13."""
+    build_manifest_repo(tmp_path)
+    index_path = tmp_path / manifests.INDEX_RELPATH
+    index_path.write_text('{"skills": []}\n', encoding="utf-8")
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V13" in _check_ids(violations)
+
+
+def test_v13_index_json_whitespace_only_change_is_violation(tmp_path: Path) -> None:
+    """Byte comparison catches a reformatting that leaves the JSON equivalent."""
+    build_manifest_repo(tmp_path)
+    index_path = tmp_path / manifests.INDEX_RELPATH
+    document = json.loads(index_path.read_text(encoding="utf-8"))
+    index_path.write_text(json.dumps(document, indent=4) + "\n", encoding="utf-8")
+    violations = check_manifest_drift(tmp_path)
+    assert [violation.check for violation in violations] == ["V13"]
+
+
+def test_v13_missing_index_json_is_violation(tmp_path: Path) -> None:
+    """A repository with no ``skills/index.json`` at all is reported as V13."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / manifests.INDEX_RELPATH).unlink()
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V13" in _check_ids(violations)
+
+
+def test_v13_reports_the_manifest_relative_path(tmp_path: Path) -> None:
+    """The reported path is the manifest's own repository-relative path."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / manifests.INDEX_RELPATH).unlink()
+    violations = check_manifest_drift(tmp_path)
+    assert [violation.path for violation in violations] == [str(manifests.INDEX_RELPATH)]
+    assert violations[0].line is None
+
+
+def test_v13_ungeneratable_manifests_are_a_single_violation(tmp_path: Path) -> None:
+    """When generation itself fails, one V13 violation carries the reason."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / "VERSION").unlink()
+    violations = check_manifest_drift(tmp_path)
+    assert [violation.check for violation in violations] == ["V13"]
+    assert "VERSION" in violations[0].message
+
+
+def test_v13_ungeneratable_manifests_surface_through_validate_repository(tmp_path: Path) -> None:
+    """The generation failure also reaches the repository-level entry point."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / "VERSION").unlink()
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V13" in _check_ids(violations)
+
+
+# --------------------------------------------------------------------------- #
+# V14: .claude-plugin/marketplace.json matches and keeps its shape
+# --------------------------------------------------------------------------- #
+
+
+def test_v14_generated_marketplace_is_valid(tmp_path: Path) -> None:
+    """The generated marketplace manifest passes the structural checks."""
+    build_manifest_repo(tmp_path)
+    assert check_marketplace_shape(tmp_path) == []
+
+
+def test_v14_edited_marketplace_json_is_violation(tmp_path: Path) -> None:
+    """A hand-edited ``.claude-plugin/marketplace.json`` is reported as V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["description"] = "hand written"
+    write_marketplace(tmp_path, document)
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V14" in _check_ids(violations)
+
+
+def test_v14_missing_marketplace_json_is_violation(tmp_path: Path) -> None:
+    """A missing marketplace manifest is reported as V14 by the shape check too."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / manifests.MARKETPLACE_RELPATH).unlink()
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_malformed_marketplace_json_is_violation(tmp_path: Path) -> None:
+    """A marketplace manifest that is not valid JSON is reported as V14."""
+    build_manifest_repo(tmp_path)
+    (tmp_path / manifests.MARKETPLACE_RELPATH).write_text("{not json", encoding="utf-8")
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_plugin_json_present_is_violation(tmp_path: Path) -> None:
+    """A committed ``.claude-plugin/plugin.json`` is reported as V14."""
+    build_manifest_repo(tmp_path)
+    plugin_json_path = tmp_path / manifests.PLUGIN_JSON_RELPATH
+    plugin_json_path.write_text('{"name": "agent-skills"}\n', encoding="utf-8")
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V14" in _check_ids(violations)
+
+
+def test_v14_owner_as_string_is_violation(tmp_path: Path) -> None:
+    """A string ``owner`` parses as JSON but breaks the schema, so it is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["owner"] = manifests.MARKETPLACE_OWNER
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_owner_without_name_is_violation(tmp_path: Path) -> None:
+    """An ``owner`` mapping lacking the mandatory ``name`` key is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["owner"] = {"url": "https://example.invalid"}
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_two_plugin_entries_is_violation(tmp_path: Path) -> None:
+    """More than one plugin entry is V14: this repository ships exactly one."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"] = [document["plugins"][0], dict(document["plugins"][0])]
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_plugins_not_a_list_is_violation(tmp_path: Path) -> None:
+    """A ``plugins`` value that is not a list is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"] = {"name": "agent-skills"}
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_unexpected_plugin_source_is_violation(tmp_path: Path) -> None:
+    """A ``source`` other than the marketplace root is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"][0]["source"] = "./plugins/agent-skills"
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_plugin_skills_key_is_violation(tmp_path: Path) -> None:
+    """A ``skills`` key replaces Claude Code's default scan, so it is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"][0]["skills"] = ["./skills/alpha-skill"]
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+    assert "skills" in violations[0].message
+
+
+def test_v14_plugin_skills_key_surfaces_through_validate_repository(tmp_path: Path) -> None:
+    """The most important structural check also reaches the entry point."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"][0]["skills"] = ["./skills/alpha-skill"]
+    write_marketplace(tmp_path, document)
+    violations = validate_repository(tmp_path, min_skills=1, verify_manifests=True)
+    assert "V14" in _check_ids(violations)
+
+
+def test_v14_plugin_version_mismatch_is_violation(tmp_path: Path) -> None:
+    """A plugin ``version`` disagreeing with ``VERSION`` is V14."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"][0]["version"] = "9.9.9"
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+def test_v14_shape_check_survives_an_empty_plugins_list(tmp_path: Path) -> None:
+    """An empty ``plugins`` list is reported rather than raising IndexError."""
+    build_manifest_repo(tmp_path)
+    document = read_marketplace(tmp_path)
+    document["plugins"] = []
+    write_marketplace(tmp_path, document)
+    violations = check_marketplace_shape(tmp_path)
+    assert [violation.check for violation in violations] == ["V14"]
+
+
+# --------------------------------------------------------------------------- #
+# validate_repository wiring for the manifest checks
+# --------------------------------------------------------------------------- #
+
+
+def test_validate_repository_skips_manifest_checks_by_default(tmp_path: Path) -> None:
+    """Regression guard: a repository with no manifests at all stays clean.
+
+    Every pre-existing test builds a synthetic repository that has neither a
+    ``VERSION`` file nor a manifest, so the manifest checks must stay opt-in.
+    """
+    write_skill(tmp_path, name="alpha-skill")
+    assert validate_repository(tmp_path, min_skills=1) == []
+
+
+def test_validate_repository_reports_manifest_violations_last(tmp_path: Path) -> None:
+    """Manifest violations are appended after V00 and the per-skill ones."""
+    write_skill(tmp_path, name="alpha-skill", license_value="Apache-2.0")
+    write_project_version(tmp_path)
+    manifests.write_manifests(tmp_path)
+    (tmp_path / manifests.INDEX_RELPATH).unlink()
+    violations = validate_repository(tmp_path, min_skills=2, verify_manifests=True)
+    checks = [violation.check for violation in violations]
+    assert checks[0] == "V00"
+    assert checks[-1] == "V13"
+    assert checks.index("V06") < checks.index("V13")
