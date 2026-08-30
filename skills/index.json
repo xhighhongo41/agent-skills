@@ -10,7 +10,7 @@
     },
     {
       "name": "skill-sync",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -18,7 +18,7 @@
     },
     {
       "name": "version-implement",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -26,7 +26,7 @@
     },
     {
       "name": "version-release",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -34,7 +34,7 @@
     },
     {
       "name": "version-start",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
