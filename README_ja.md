@@ -29,13 +29,25 @@ Agent Skills 形式を読む他のツールでも動作するはずです。
 | `version-start` | 新バージョンの開始手順。プロジェクト文書の読解、コードベースの把握、ブランチ作成、実装計画書のドラフト作成まで行い、実装には入りません。 |
 | `version-implement` | 確定した計画を完了まで進めます。入場ゲートでの回答照合、タスクごとの TDD サイクル、自走と中断を判定する決定木で動きます。 |
 | `version-release` | リリース手順のチェックリスト。バージョン上げ忘れの検出、文書追随の確認、検証、PR、マージ、タグ付与、リリースノートのドラフト作成まで。 |
+| `skill-sync` | 自マシンのどのエージェントにどのスキルのどの版が入っているかを一覧し、本リポジトリと比較して、選んだものだけを更新します。 |
 
 後半3つは `PROJECT.md` という進行文書を軸にした一連のワークフロー（開始 → 実装 → リリース）です。
 言語やスタックを前提にせず、対象プロジェクトの文書から必要な情報を読み取って動きます。
 
 ## インストール
 
-どの方法でも配置されるファイルは同じです。好きな方法を選んでください。
+配置されるファイルはどの方法でも同じです。前半2つはどのエージェントでも使え、
+後半3つは各エージェント自身の導入機構です。
+
+| 方法 | 対象 | 更新の届き方 | 呼び出し名 |
+|---|---|---|---|
+| **A** エージェント自身にやらせる | 全部 | もう一度頼む | `/python-coding` |
+| **B** 手動でコピー | 全部 | もう一度コピー、または `skill-sync` | `/python-coding` |
+| **C** Codex の `skill-installer` | OpenAI Codex | 入れ直す（バージョン比較機構が無い） | `/python-coding` |
+| **D** OpenCode の `skills.urls` | OpenCode | 自動（版が変わったとき） | `/python-coding` |
+| **E** Claude Code の marketplace | Claude Code | `/plugin marketplace update` | `/agent-skills:python-coding` |
+
+**D** と **E** は全スキルが一度に入ります。**A**・**B**・**C** は1スキルずつです。
 
 ### 方法A — エージェント自身にやらせる（いちばん簡単）
 
@@ -80,9 +92,60 @@ https://github.com/xhighhongo41/agent-skills/tree/main/skills/python-coding
 のスキルを入れて
 ```
 
+### 方法D — OpenCode の `skills.urls` を使う
+
+OpenCode は本リポジトリから直接スキルを取得し、最新に保つことができます。
+`opencode.json` にマニフェストのあるディレクトリを指定してください。
+
+```json
+{
+  "skills": {
+    "urls": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
+  }
+}
+```
+
+OpenCode v2（別バイナリの `opencode2`）はフラットな配列で書きます。
+
+```json
+{
+  "skills": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
+}
+```
+
+OpenCode はそのディレクトリの `index.json` を読み、そこに載っているスキルをすべて
+ダウンロードします。スキルの版が変わると自動的に取り直します。
+
+最新を追いかけるのではなく特定のリリースに固定したい場合は、URL の `main` を
+`v1.0.0` のようなタグに置き換えてください。
+
+### 方法E — Claude Code の plugin marketplace を使う
+
+```
+/plugin marketplace add xhighhongo41/agent-skills
+/plugin install agent-skills@xhighhongo41-agent-skills
+```
+
+全スキルが1つのプラグインとして入ります。他の方法と違う点が2つあります。
+
+- **スキル名に名前空間が付きます。** `/python-coding` ではなく
+  `/agent-skills:python-coding` で呼び出します。素の名前で呼びたい場合は方法A・Bを
+  使ってください。プラグイン版と個人コピーは互いを上書きせず共存できます。
+- **サードパーティのマーケットプレイスは自動更新が既定でオフ**です。最新にしたいときは
+  `/plugin marketplace update xhighhongo41-agent-skills` を実行するか、
+  `/plugin` → Marketplaces で自動更新を有効にしてください。
+
+特定のリリースに固定したい場合はタグを付けます。
+`/plugin marketplace add xhighhongo41/agent-skills@v1.0.0`
+
+マーケットプレイス名が `agent-skills` ではなく `xhighhongo41-agent-skills` なのは、
+Claude Code が素の `agent-skills` を Anthropic 公式マーケットプレイス用に予約しているためです。
+
 ### インストールできたかの確認
 
 新しいセッションを開始して `/python-coding`（あるいは `/version-start` など）を実行します。
+marketplace（方法E）で入れた場合の名前は `/agent-skills:python-coding` です。
+
 各スキルは初回使用時に次のように宣言します。
 
 ```
@@ -132,12 +195,17 @@ OpenCode は Claude Code のスキルディレクトリをそのまま読みま�
 
 ## 更新
 
-インストールに使った方法をもう一度実行すれば上書きされます。
-今どのバージョンが入っているかは、インストール済みの `SKILL.md` の `metadata.version` と
-本リポジトリのものを比べれば分かります。
+| 方法 | すること |
+|---|---|
+| **A**・**B** | インストールをもう一度実行すれば上書きされます |
+| **C** | `skill-installer` にもう一度頼みます。バージョン比較機構が無いので、入れ直すことが更新そのものです |
+| **D** | 何もしなくて構いません。スキルの版が変わると OpenCode が取り直します |
+| **E** | `/plugin marketplace update xhighhongo41-agent-skills` |
 
-> 導入済みバージョンの一覧と更新有無を調べる `skill-sync` スキル、および
-> OpenCode / Claude Code のネイティブな導入機構への対応は v1.0 で予定しています。
+今どのバージョンが入っているかを調べるには、本リポジトリの **`skill-sync`** スキルを
+使ってください。自マシンの各エージェントのスキルディレクトリを走査し、
+本リポジトリの `index.json` と版を突き合わせて、**承認を得たうえで**古いものだけを
+取得・配置します。スキル単位でもエージェント単位でも、まとめてでも指定できます。
 
 ## バージョンについて
 
@@ -150,6 +218,19 @@ metadata:
 
 セマンティックバージョニングに従い、手順の破壊的変更でメジャー、手順の追加でマイナー、
 文言の修正でパッチを上げます。
+
+リポジトリ自体のバージョンはこれとは別で、直下の `VERSION` ファイルとリリースタグで
+表現します。Claude Code のプラグインが表示するのはこちらの番号です。
+
+## 変更履歴
+
+| バージョン | 変更内容 |
+|---|---|
+| **1.0.0** | 公式導入経路のマニフェストを追加。OpenCode の `skills.urls` と Claude Code の plugin marketplace の両方を実機で検証済み（従来からの Codex `skill-installer` 経路と併せて3経路）。導入状況の一覧と更新を行う `skill-sync` スキルを追加。 |
+| 0.1.0 | 最初の収集。4スキルを1つのリポジトリにまとめ、規約・バージョン・CI 検証を統一。プレリリースのため手動コピーのみ。 |
+
+各リリースの詳細は
+[リリースページ](https://github.com/xhighhongo41/agent-skills/releases)にあります。
 
 ## ライセンス
 

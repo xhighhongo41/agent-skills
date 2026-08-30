@@ -31,6 +31,7 @@ Any other tool that reads the Agent Skills format should work too.
 | `version-start` | Opens a new version: reads the project docs, surveys the codebase, creates the branch, and drafts an implementation plan. Stops before implementing. |
 | `version-implement` | Drives a fixed plan to completion: gated entry, TDD cycles per task, a decision tree that says when to keep going and when to stop and ask. |
 | `version-release` | Runs the release checklist: version-bump detection, doc sync, verification, PR, merge, tag, draft release notes. |
+| `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick. |
 
 The last three form a workflow (start → implement → release) built around a
 `PROJECT.md` progress document. They make no assumption about your language or
@@ -38,7 +39,18 @@ stack — everything is discovered from your project's own documents.
 
 ## Installation
 
-Every route below installs the same files. Pick whichever suits you.
+Five routes, all installing the same files. The first two work with any agent;
+the other three are each agent's own mechanism.
+
+| Route | For | How updates arrive | Invoked as |
+|---|---|---|---|
+| **A** Ask your agent | any | re-run the request | `/python-coding` |
+| **B** Copy it yourself | any | re-run, or use `skill-sync` | `/python-coding` |
+| **C** Codex `skill-installer` | OpenAI Codex | reinstall; it has no version check | `/python-coding` |
+| **D** OpenCode `skills.urls` | OpenCode | automatic, when a version changes | `/python-coding` |
+| **E** Claude Code marketplace | Claude Code | `/plugin marketplace update` | `/agent-skills:python-coding` |
+
+Routes **D** and **E** install every skill at once. **A**, **B** and **C** take one skill at a time.
 
 ### Option A — Ask your agent to do it (easiest)
 
@@ -82,9 +94,62 @@ Use skill-installer to install
 https://github.com/xhighhongo41/agent-skills/tree/main/skills/python-coding
 ```
 
+### Option D — OpenCode `skills.urls`
+
+OpenCode can fetch skills from this repository itself and keep them current.
+Point it at the manifest directory in your `opencode.json`:
+
+```json
+{
+  "skills": {
+    "urls": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
+  }
+}
+```
+
+OpenCode v2 — the separate `opencode2` binary — takes a flat array instead:
+
+```json
+{
+  "skills": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
+}
+```
+
+OpenCode reads `index.json` from that directory, downloads every skill listed in
+it, and refetches a skill whenever its version string changes.
+
+To pin a release rather than track the latest, replace `main` in the URL with a
+tag such as `v1.0.0`.
+
+### Option E — Claude Code plugin marketplace
+
+```
+/plugin marketplace add xhighhongo41/agent-skills
+/plugin install agent-skills@xhighhongo41-agent-skills
+```
+
+That installs every skill as a single plugin. Two things differ from the other routes:
+
+- **The skills are namespaced.** Invoke them as `/agent-skills:python-coding`,
+  not `/python-coding`. If you want the bare name, use Option A or B — a plugin
+  copy and a personal copy can coexist without overriding each other.
+- **Auto-update is off by default** for third-party marketplaces. Run
+  `/plugin marketplace update xhighhongo41-agent-skills` when you want the
+  latest, or switch auto-update on under `/plugin` → Marketplaces.
+
+To pin a release, append the tag:
+`/plugin marketplace add xhighhongo41/agent-skills@v1.0.0`.
+
+The marketplace is called `xhighhongo41-agent-skills` rather than
+`agent-skills` because Claude Code reserves the bare name for official Anthropic
+marketplaces.
+
 ### Verifying the install
 
 Start a new session and run `/python-coding` (or `/version-start`, and so on).
+If you installed through the plugin marketplace (Option E), the name is
+`/agent-skills:python-coding`.
+
 Each skill announces itself on first use, for example:
 
 ```
@@ -134,12 +199,18 @@ it twice. To turn that off, set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`.
 
 ## Updating
 
-Re-run whichever installation route you used; it overwrites the previous copy.
-To check what you have, compare the `metadata.version` in your installed
-`SKILL.md` with the one in this repository.
+| Route | What to do |
+|---|---|
+| **A**, **B** | Re-run the install; it overwrites the previous copy |
+| **C** | Ask `skill-installer` again — it has no version comparison, so reinstalling *is* the update |
+| **D** | Nothing. OpenCode refetches a skill when its version changes |
+| **E** | `/plugin marketplace update xhighhongo41-agent-skills` |
 
-> A `skill-sync` skill that reports installed versions and available updates,
-> plus native install manifests for OpenCode and Claude Code, are planned for v1.0.
+To find out what you actually have, use the **`skill-sync`** skill from this
+repository. It scans the skill directory of every agent on your machine,
+compares each installed version against this repository's `index.json`, and —
+once you approve — fetches and places the ones that are out of date. You can
+limit it to a single skill, a single agent, or let it cover everything.
 
 ## Versioning
 
@@ -153,6 +224,19 @@ metadata:
 
 Versions follow semantic versioning: a breaking change to a procedure bumps the
 major, a new step bumps the minor, wording fixes bump the patch.
+
+The repository itself is versioned separately, in the top-level `VERSION` file
+and in the release tags. That is the number the Claude Code plugin reports.
+
+## Changelog
+
+| Version | What changed |
+|---|---|
+| **1.0.0** | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
+| 0.1.0 | First collection: four skills gathered into one repository with unified conventions, versions and CI validation. Pre-release; manual copy only. |
+
+Each release's full notes are on the
+[releases page](https://github.com/xhighhongo41/agent-skills/releases).
 
 ## License
 
