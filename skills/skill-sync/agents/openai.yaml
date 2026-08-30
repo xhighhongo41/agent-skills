@@ -1,0 +1,4 @@
+interface:
+  display_name: "スキル同期"
+  short_description: "導入済みスキルの一覧と更新"
+  default_prompt: "$skill-sync を使って、導入済みスキルの版を一覧し、更新の要否を判定してください。"
