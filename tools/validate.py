@@ -86,7 +86,6 @@ DENYLIST: tuple[str, ...] = (
     "Explore",
     # Agent-specific configuration paths.
     ".claude/agents",
-    # Unrelated private project names.
     # Absolute home directory paths, which would leak a local account name.
     # The path prefixes are matched rather than any specific user name, so this
     # list itself stays free of personal information.
