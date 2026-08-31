@@ -1,0 +1,4 @@
+interface:
+  display_name: "テスト駆動開発"
+  short_description: "テストを先に書き、実装を検証できていることを確かめる"
+  default_prompt: "$test-driven-development を使って、この機能をテスト駆動開発で実装してください。"
