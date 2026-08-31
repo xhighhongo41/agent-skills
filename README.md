@@ -31,9 +31,9 @@ Any other tool that reads the Agent Skills format should work too.
 | `version-start` | Opens a new version: reads the project docs, surveys the codebase, creates the branch, and drafts an implementation plan. Stops before implementing. |
 | `version-implement` | Drives a fixed plan to completion: gated entry, TDD cycles per task, a decision tree that says when to keep going and when to stop and ask. |
 | `version-release` | Runs the release checklist: version-bump detection, doc sync, verification, PR, merge, tag, draft release notes. |
-| `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick. |
+| `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick — inside its own agent's config directory only. |
 
-The last three form a workflow (start → implement → release) built around a
+The three `version-*` skills form a workflow (start → implement → release) built around a
 `PROJECT.md` progress document. They make no assumption about your language or
 stack — everything is discovered from your project's own documents.
 
