@@ -28,14 +28,20 @@ Any other tool that reads the Agent Skills format should work too.
 | Skill | What it does |
 |---|---|
 | `python-coding` | Applies a consistent Python style — PEP 8/257/484, type hints, docstrings, single responsibility — when writing or reviewing Python. |
+| `test-driven-development` | Writes the tests first: signature, tests, a run that confirms they fail, then the implementation. Covers new work, updates and bug fixes, and says what to do when a test itself looks wrong. |
 | `version-start` | Opens a new version: reads the project docs, surveys the codebase, creates the branch, and drafts an implementation plan. Stops before implementing. |
-| `version-implement` | Drives a fixed plan to completion: gated entry, TDD cycles per task, a decision tree that says when to keep going and when to stop and ask. |
+| `version-implement` | Drives a fixed plan to completion: gated entry, a cycle per task, a decision tree that says when to keep going and when to stop and ask. |
 | `version-release` | Runs the release checklist: version-bump detection, doc sync, verification, PR, merge, tag, draft release notes. |
 | `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick — inside its own agent's config directory only. |
 
 The three `version-*` skills form a workflow (start → implement → release) built around a
 `PROJECT.md` progress document. They make no assumption about your language or
 stack — everything is discovered from your project's own documents.
+
+`test-driven-development` deliberately stands apart from that workflow. Whether
+you work test-first is your policy, not a skill's, so `version-implement` leaves
+the implementation style to your global instructions. That means you can write
+"we develop test-first" there and leave the procedure itself to this skill.
 
 ## Installation
 
@@ -186,6 +192,7 @@ When a skill refers to a subagent by role, use these:
 - 読解役サブエージェント (reading documents) → <your reader agent>
 - 探索役サブエージェント (searching the codebase) → <your search agent>
 - Web調査役サブエージェント (web research) → <your research agent>
+- 判定役サブエージェント (ruling on whether a test or the implementation is wrong) → <your reviewer agent>
 ```
 
 This is optional. Without it the agent falls back to whatever general-purpose
@@ -243,7 +250,8 @@ fails the build.
 
 | Version | What changed |
 |---|---|
-| **1.1.0** | `skill-sync` now writes only inside the config directory of the agent running it, and will not update another agent's skills on your behalf — run it from that agent instead. The three version-workflow skills handle a hosting CLI holding several accounts: they switch to the repository's owner when needed and always switch back. |
+| **1.2.0** | Adds the `test-driven-development` skill: signature, tests, a run that confirms they fail, then the implementation — covering new work, updates and bug fixes. Each way of making a test pass without meaning it lists how to spot it, since naming the rule alone does not stop it. Also corrects the `version-implement` entry in the skill table, which promised TDD cycles the skill never mandated. |
+| 1.1.0 | `skill-sync` now writes only inside the config directory of the agent running it, and will not update another agent's skills on your behalf — run it from that agent instead. The three version-workflow skills handle a hosting CLI holding several accounts: they switch to the repository's owner when needed and always switch back. |
 | 1.0.0 | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
 | 0.1.0 | First collection: four skills gathered into one repository with unified conventions, versions and CI validation. Pre-release; manual copy only. |
 
