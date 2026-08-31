@@ -31,9 +31,9 @@ Any other tool that reads the Agent Skills format should work too.
 | `version-start` | Opens a new version: reads the project docs, surveys the codebase, creates the branch, and drafts an implementation plan. Stops before implementing. |
 | `version-implement` | Drives a fixed plan to completion: gated entry, TDD cycles per task, a decision tree that says when to keep going and when to stop and ask. |
 | `version-release` | Runs the release checklist: version-bump detection, doc sync, verification, PR, merge, tag, draft release notes. |
-| `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick. |
+| `skill-sync` | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick — inside its own agent's config directory only. |
 
-The last three form a workflow (start → implement → release) built around a
+The three `version-*` skills form a workflow (start → implement → release) built around a
 `PROJECT.md` progress document. They make no assumption about your language or
 stack — everything is discovered from your project's own documents.
 
@@ -207,10 +207,14 @@ it twice. To turn that off, set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`.
 | **E** | `/plugin marketplace update xhighhongo41-agent-skills` |
 
 To find out what you actually have, use the **`skill-sync`** skill from this
-repository. It scans the skill directory of every agent on your machine,
-compares each installed version against this repository's `index.json`, and —
-once you approve — fetches and places the ones that are out of date. You can
-limit it to a single skill, a single agent, or let it cover everything.
+repository. It reports the versions you have installed, compares them against
+this repository's `index.json`, and — once you approve — fetches and places the
+copies that are out of date. You can limit it to a single skill or let it cover
+everything.
+
+**It writes only inside the config directory of the agent you run it from.** It
+will not update another agent's skills on your behalf; to update a different
+agent, run `skill-sync` from that agent.
 
 ## Versioning
 
@@ -228,11 +232,19 @@ major, a new step bumps the minor, wording fixes bump the patch.
 The repository itself is versioned separately, in the top-level `VERSION` file
 and in the release tags. That is the number the Claude Code plugin reports.
 
+**The repository version bumps whenever any skill changes — even just one**, and
+it follows the largest change in the release: a skill's major bump makes it a
+major release, a minor a minor, patches a patch. Plugin users only see an update
+when this number moves, so it is never left behind while skills quietly drift
+forward. CI enforces this: a change under `skills/` with no matching version bump
+fails the build.
+
 ## Changelog
 
 | Version | What changed |
 |---|---|
-| **1.0.0** | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
+| **1.1.0** | `skill-sync` now writes only inside the config directory of the agent running it, and will not update another agent's skills on your behalf — run it from that agent instead. The three version-workflow skills handle a hosting CLI holding several accounts: they switch to the repository's owner when needed and always switch back. |
+| 1.0.0 | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
 | 0.1.0 | First collection: four skills gathered into one repository with unified conventions, versions and CI validation. Pre-release; manual copy only. |
 
 Each release's full notes are on the

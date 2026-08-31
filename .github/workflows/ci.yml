@@ -16,6 +16,11 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: tools/version_guard.py compares the commit
+          # against the latest release tag, and silently skips itself when the
+          # default shallow clone leaves no tag to compare with.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
