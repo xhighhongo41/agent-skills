@@ -237,12 +237,21 @@ def build_index(repo_root: Path) -> dict[str, Any]:
     an omitted skill is still refused when it cannot be parsed or declares no
     version — being unlisted is not a way to escape them.
 
+    Each entry repeats the skill's own ``compatibility`` when it declares one,
+    because an installer reading the manifest never sees the frontmatter and
+    would otherwise have no way to tell a restricted skill from one common to
+    every harness.  The key is left out when nothing is declared: an absent key
+    already reads as "every harness", and a stand-in such as ``""`` or
+    ``"all"`` would be a second spelling of that same fact.
+
     Args:
         repo_root: Repository root (the directory containing ``skills/``).
 
     Returns:
         The manifest as ``{"skills": [{"name", "version", "files"}, ...]}``,
-        with skills in name order.  ``{"skills": []}`` when no skill qualifies.
+        with skills in name order and ``compatibility`` inserted before
+        ``files`` in the entries that declare it.  ``{"skills": []}`` when no
+        skill qualifies.
 
     Raises:
         ManifestError: When a skill cannot be parsed or declares no version.
@@ -265,7 +274,19 @@ def build_index(repo_root: Path) -> dict[str, Any]:
             continue
 
         name = doc.declared_name if doc.declared_name is not None else skill_dir.name
-        entries.append({"name": name, "version": version, "files": collect_skill_files(skill_dir)})
+        entry: dict[str, Any] = {"name": name, "version": version}
+        # The value is copied exactly as written, spacing and order included:
+        # ``V15`` has already fixed the vocabulary, so re-spelling it here would
+        # only make the manifest disagree with the ``SKILL.md`` it came from.  A
+        # declaration that is present but unusable cannot reach this point, the
+        # filter above having dropped it, so ``None`` means "not declared".
+        declared_compatibility = doc.declared_compatibility
+        if declared_compatibility is not None:
+            entry["compatibility"] = declared_compatibility
+        # ``files`` is added last on purpose: the committed manifest is compared
+        # byte for byte, so the field order is part of what the file promises.
+        entry["files"] = collect_skill_files(skill_dir)
+        entries.append(entry)
 
     # ``discover_skill_dirs`` already sorts by folder name, but the manifest
     # order must follow the declared ``name``, so it is sorted again explicitly.

@@ -366,6 +366,91 @@ def test_build_index_filtering_keeps_the_remaining_skills_in_name_order(tmp_path
     assert [entry["name"] for entry in document["skills"]] == ["alpha-skill", "zebra-skill"]
 
 
+def test_build_index_entry_carries_a_declared_compatibility(tmp_path: Path) -> None:
+    """A skill that restricts itself says so in its entry.
+
+    An installer reading only the manifest has no access to the skill's
+    frontmatter, so the declaration has to travel with the entry for it to be
+    able to tell a restricted skill from one common to every harness.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "opencode-skill", compatibility="opencode")
+    entry = build_index(tmp_path)["skills"][0]
+    assert entry["compatibility"] == "opencode"
+
+
+def test_build_index_entry_omits_compatibility_when_it_is_not_declared(tmp_path: Path) -> None:
+    """A skill common to every harness carries no ``compatibility`` key at all.
+
+    The manifest keeps the frontmatter's reading of an absent key — "every
+    harness" — rather than inventing a value such as an empty string or
+    ``"all"``, which would be a second spelling of the same fact.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "common-skill")
+    entry = build_index(tmp_path)["skills"][0]
+    assert "compatibility" not in entry
+
+
+@pytest.mark.parametrize(
+    "compatibility",
+    ["codex, opencode", "opencode,codex"],
+    ids=["spaced", "unspaced"],
+)
+def test_build_index_entry_keeps_a_multi_harness_compatibility_verbatim(
+    tmp_path: Path, compatibility: str
+) -> None:
+    """The declared string is copied as written, spacing and order included.
+
+    ``V15`` already fixes the vocabulary, so by the time a value reaches the
+    generator it is valid; re-spelling it here would only make the manifest
+    disagree with the ``SKILL.md`` it was generated from.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "shared-skill", compatibility=compatibility)
+    entry = build_index(tmp_path)["skills"][0]
+    assert entry["compatibility"] == compatibility
+
+
+def test_build_index_entry_field_order_puts_compatibility_before_files(tmp_path: Path) -> None:
+    """A declaring entry is ordered ``name``, ``version``, ``compatibility``, ``files``.
+
+    The committed manifest is compared byte for byte, so the key order is part
+    of what the file promises rather than an incidental detail. ``files`` comes
+    last because it is the long one.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "opencode-skill", compatibility="opencode")
+    entry = build_index(tmp_path)["skills"][0]
+    assert list(entry.keys()) == ["name", "version", "compatibility", "files"]
+
+
+def test_build_index_entry_field_order_without_compatibility_is_unchanged(tmp_path: Path) -> None:
+    """Omitting the key removes it from the order instead of leaving a hole."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "common-skill")
+    entry = build_index(tmp_path)["skills"][0]
+    assert list(entry.keys()) == ["name", "version", "files"]
+
+
+def test_build_index_reports_compatibility_only_for_the_skills_it_serves(tmp_path: Path) -> None:
+    """A skill the filter drops has no entry, not an entry naming another harness.
+
+    Reporting the declaration is separate from acting on it: membership is still
+    decided by the harness filter, and the field only annotates what survives.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "common-skill")
+    write_skill(tmp_path, "opencode-skill", compatibility="opencode")
+    write_skill(tmp_path, "codex-only-skill", compatibility="codex")
+
+    entries = {entry["name"]: entry for entry in build_index(tmp_path)["skills"]}
+
+    assert set(entries) == {"common-skill", "opencode-skill"}
+    assert "compatibility" not in entries["common-skill"]
+    assert entries["opencode-skill"]["compatibility"] == "opencode"
+
+
 # --------------------------------------------------------------------------- #
 # build_marketplace
 # --------------------------------------------------------------------------- #
@@ -548,6 +633,19 @@ def test_write_manifests_index_omits_skills_that_do_not_target_opencode(tmp_path
     write_manifests(tmp_path)
     document = json.loads((tmp_path / INDEX_RELPATH).read_text(encoding="utf-8"))
     assert [entry["name"] for entry in document["skills"]] == ["common-skill"]
+
+
+def test_write_manifests_index_keeps_the_entry_field_order_on_disk(tmp_path: Path) -> None:
+    """The committed file, not just the in-memory document, carries the field order.
+
+    ``check_manifests`` compares bytes, so a generator that emitted the same
+    fields in a different order would show up as a permanently stale manifest.
+    """
+    write_version(tmp_path)
+    write_skill(tmp_path, "opencode-skill", compatibility="opencode")
+    write_manifests(tmp_path)
+    document = json.loads((tmp_path / INDEX_RELPATH).read_text(encoding="utf-8"))
+    assert list(document["skills"][0].keys()) == ["name", "version", "compatibility", "files"]
 
 
 def test_write_manifests_returns_the_written_paths(tmp_path: Path) -> None:

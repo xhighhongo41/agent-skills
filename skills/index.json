@@ -3,6 +3,25 @@
     {
       "name": "council",
       "version": "1.0.0",
+      "compatibility": "opencode",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "plugin-update-apply",
+      "version": "1.0.0",
+      "compatibility": "opencode",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "plugin-update-check",
+      "version": "1.0.0",
+      "compatibility": "opencode",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -18,7 +37,7 @@
     },
     {
       "name": "skill-sync",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -50,7 +69,7 @@
     },
     {
       "name": "version-start",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
