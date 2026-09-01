@@ -10,6 +10,24 @@
       ]
     },
     {
+      "name": "plugin-update-apply",
+      "version": "1.0.0",
+      "compatibility": "opencode",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "plugin-update-check",
+      "version": "1.0.0",
+      "compatibility": "opencode",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
       "name": "python-coding",
       "version": "1.0.0",
       "files": [

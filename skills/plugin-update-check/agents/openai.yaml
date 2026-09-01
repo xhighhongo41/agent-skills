@@ -1,0 +1,4 @@
+interface:
+  display_name: "プラグイン更新確認"
+  short_description: "更新の有無を調べる"
+  default_prompt: "$plugin-update-check を使って、プラグインに更新があるか調べてください。"

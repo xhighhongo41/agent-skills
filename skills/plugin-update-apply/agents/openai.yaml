@@ -1,0 +1,4 @@
+interface:
+  display_name: "プラグイン更新適用"
+  short_description: "承認のうえ更新を適用"
+  default_prompt: "$plugin-update-apply を使って、プラグインの更新を適用してください。"

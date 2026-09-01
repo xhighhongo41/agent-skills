@@ -14,7 +14,7 @@ cd "$repo_root"
 # Number of skills this version ships. Stated here rather than left at the
 # default of 1 so that a skill folder disappearing fails the build instead of
 # quietly shrinking the release.
-expected_skills=7
+expected_skills=9
 
 # Prefer an interpreter that already has the dependencies; otherwise fall back
 # to uv, which resolves them into a throwaway environment rather than installing
