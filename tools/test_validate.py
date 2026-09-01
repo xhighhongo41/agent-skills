@@ -7,7 +7,7 @@ below builds a synthetic skill folder under ``tmp_path`` and drives it
 through :func:`validate.validate_skill`, so no test touches the network,
 the user's home directory or this repository's real ``skills/`` folder.
 
-Each test name embeds the check identifier (``V00``..``V14``) it protects,
+Each test name embeds the check identifier (``V00``..``V16``) it protects,
 per the convention documented in ``validate.py``. For every check there is
 at least one "valid" test (a fully compliant skill does not trigger the
 check) and at least one "violation" test (breaking exactly one aspect of an
@@ -23,6 +23,7 @@ from typing import Any
 
 import manifests
 import pytest
+import validate
 from validate import (
     MAX_BODY_LINES,
     MAX_DESCRIPTION_CHARS,
@@ -55,12 +56,27 @@ def _check_ids(violations: list[Violation]) -> set[str]:
     return {violation.check for violation in violations}
 
 
+def _harness_description(*display_names: str) -> str:
+    """Return a description opening with the preamble that V16 requires.
+
+    Args:
+        *display_names: Harness display names, in the order the skill's
+            ``compatibility`` value lists the matching keys.
+
+    Returns:
+        ``"<A / B> 専用。"`` followed by the default description text.
+    """
+    return f"{' / '.join(display_names)} 専用。{DEFAULT_DESCRIPTION}"
+
+
 def _build_frontmatter(
     *,
     name: str | None,
     description: str | None,
     quote_description: bool,
     license_value: str | None,
+    compatibility: str | None,
+    compatibility_raw: str | None,
     version: str | None,
     quote_version: bool,
     metadata_raw: str | None,
@@ -77,6 +93,10 @@ def _build_frontmatter(
             lines.append(f"description: {description}")
     if license_value is not None:
         lines.append(f"license: {license_value}")
+    if compatibility_raw is not None:
+        lines.append(compatibility_raw)
+    elif compatibility is not None:
+        lines.append(f'compatibility: "{compatibility}"')
     if metadata_raw is not None:
         lines.append(metadata_raw)
     elif version is not None:
@@ -140,6 +160,8 @@ def write_skill(
     description: str | None = DEFAULT_DESCRIPTION,
     quote_description: bool = True,
     license_value: str | None = "MIT",
+    compatibility: str | None = None,
+    compatibility_raw: str | None = None,
     version: str | None = DEFAULT_VERSION,
     quote_version: bool = True,
     metadata_raw: str | None = None,
@@ -172,6 +194,14 @@ def write_skill(
         quote_description: Whether the raw source line double-quotes the
             description value.
         license_value: Frontmatter ``license`` value. ``None`` omits it.
+        compatibility: Frontmatter ``compatibility`` value, written as a
+            double-quoted string. ``None`` omits the key, which is what a
+            skill common to every harness looks like; the defaults therefore
+            keep producing exactly the frontmatter they produced before this
+            argument existed.
+        compatibility_raw: When given, used verbatim as the ``compatibility``
+            line(s) instead of the quoted string (for example to make the
+            value a YAML list rather than a string).
         version: ``metadata.version`` value, and the default source for the
             body's version marker and usage declaration. ``None`` omits the
             ``metadata`` key entirely.
@@ -216,6 +246,8 @@ def write_skill(
             description=description,
             quote_description=quote_description,
             license_value=license_value,
+            compatibility=compatibility,
+            compatibility_raw=compatibility_raw,
             version=version,
             quote_version=quote_version,
             metadata_raw=metadata_raw,
@@ -623,6 +655,84 @@ def test_v11_claude_md_and_agents_md_are_not_denylisted(tmp_path: Path) -> None:
     assert "V11" not in _check_ids(violations)
 
 
+def test_v11_harness_denylist_terms_are_drawn_from_the_denylist() -> None:
+    """The exemptible phrases are exactly the denylisted ones, one per harness."""
+    assert validate.HARNESS_DENYLIST_TERMS == {
+        "claude-code": "Claude用",
+        "codex": "Codex用",
+        "opencode": "OpenCode用",
+    }
+    assert set(validate.HARNESS_DENYLIST_TERMS) == set(validate.KNOWN_HARNESSES)
+    assert all(term in validate.DENYLIST for term in validate.HARNESS_DENYLIST_TERMS.values())
+
+
+def test_v11_declared_harness_phrase_is_valid(tmp_path: Path) -> None:
+    """A skill that declares a harness may use that harness's phrase in its body."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        denylist_word="OpenCode用の手順に従う。",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" not in _check_ids(violations)
+
+
+def test_v11_every_declared_harness_phrase_is_valid(tmp_path: Path) -> None:
+    """Declaring two harnesses exempts the phrase belonging to each of them."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=_harness_description("Codex", "OpenCode"),
+        denylist_word="Codex用 と OpenCode用 の手順に従う。",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" not in _check_ids(violations)
+
+
+def test_v11_undeclared_harness_phrase_is_violation(tmp_path: Path) -> None:
+    """The exemption is per harness: an undeclared harness's phrase still fails."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        denylist_word="Claude用の手順に従う。",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" in _check_ids(violations)
+
+
+def test_v11_harness_phrase_without_compatibility_is_violation(tmp_path: Path) -> None:
+    """Regression guard: a skill declaring nothing keeps the original strict behaviour."""
+    skill_dir = write_skill(tmp_path, denylist_word="OpenCode用の手順に従う。")
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" in _check_ids(violations)
+
+
+def test_v11_subagent_name_with_compatibility_is_violation(tmp_path: Path) -> None:
+    """``compatibility`` never exempts a subagent proper name."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        denylist_word="code-implementer サブエージェントを呼び出す。",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" in _check_ids(violations)
+
+
+def test_v11_personal_home_path_with_compatibility_is_violation(tmp_path: Path) -> None:
+    """``compatibility`` never exempts a personal filesystem path."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        denylist_word="/Users/example/project を参照する。",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V11" in _check_ids(violations)
+
+
 # --------------------------------------------------------------------------- #
 # V12: agents/openai.yaml exists and carries usable interface fields
 # --------------------------------------------------------------------------- #
@@ -679,6 +789,253 @@ def test_v12_short_description_too_long_is_violation(tmp_path: Path) -> None:
     skill_dir = write_skill(tmp_path, openai_yaml_content=yaml_text)
     violations = validate_skill(skill_dir, tmp_path)
     assert "V12" in _check_ids(violations)
+
+
+# --------------------------------------------------------------------------- #
+# V15: compatibility lists known harnesses, each exactly once
+# --------------------------------------------------------------------------- #
+
+
+def test_v15_known_harnesses_map_each_key_to_its_display_name() -> None:
+    """The harness table is the single source of accepted keys and their spelling."""
+    assert validate.KNOWN_HARNESSES == {
+        "claude-code": "Claude Code",
+        "codex": "Codex",
+        "opencode": "OpenCode",
+    }
+
+
+def test_v15_no_compatibility_key_is_valid(tmp_path: Path) -> None:
+    """A skill that omits ``compatibility`` is common to every harness, not a violation."""
+    skill_dir = write_skill(tmp_path)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" not in _check_ids(violations)
+
+
+@pytest.mark.parametrize(
+    ("harness", "display_name"),
+    [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode")],
+    ids=["claude-code", "codex", "opencode"],
+)
+def test_v15_single_known_harness_is_valid(tmp_path: Path, harness: str, display_name: str) -> None:
+    """Every key of the harness table is accepted, and such a skill is otherwise clean."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility=harness,
+        description=_harness_description(display_name),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert violations == []
+
+
+def test_v15_two_known_harnesses_is_valid(tmp_path: Path) -> None:
+    """A comma-separated pair of known keys is accepted."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=_harness_description("Codex", "OpenCode"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" not in _check_ids(violations)
+
+
+def test_v15_extra_whitespace_around_keys_is_valid(tmp_path: Path) -> None:
+    """Elements are stripped before being matched, so the spacing is free."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="  codex ,  opencode  ",
+        description=_harness_description("Codex", "OpenCode"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" not in _check_ids(violations)
+
+
+@pytest.mark.parametrize(
+    "unknown_value",
+    ["OpenCode", "opencode-cli", "unknown-harness", "opencode, claude"],
+    ids=["display-name", "suffixed", "unrelated", "unknown-among-known"],
+)
+def test_v15_unknown_harness_is_violation(tmp_path: Path, unknown_value: str) -> None:
+    """A word outside the harness table is not a declaration an installer can act on."""
+    skill_dir = write_skill(tmp_path, compatibility=unknown_value)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" in _check_ids(violations)
+
+
+@pytest.mark.parametrize(
+    "empty_element_value",
+    ["opencode, ", ",opencode", "opencode,,codex", ""],
+    ids=["trailing-comma", "leading-comma", "double-comma", "empty-string"],
+)
+def test_v15_empty_element_is_violation(tmp_path: Path, empty_element_value: str) -> None:
+    """An empty element means the list itself is malformed."""
+    skill_dir = write_skill(tmp_path, compatibility=empty_element_value)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" in _check_ids(violations)
+
+
+def test_v15_duplicate_harness_is_violation(tmp_path: Path) -> None:
+    """Naming the same harness twice is a copy/paste slip rather than a declaration."""
+    skill_dir = write_skill(tmp_path, compatibility="opencode, opencode")
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" in _check_ids(violations)
+
+
+@pytest.mark.parametrize(
+    "raw_block",
+    [
+        "compatibility:\n  - opencode",
+        "compatibility: 3",
+        "compatibility:\n  opencode: true",
+    ],
+    ids=["list", "number", "mapping"],
+)
+def test_v15_non_string_value_is_violation(tmp_path: Path, raw_block: str) -> None:
+    """``compatibility`` carries a comma-separated string, never a YAML structure."""
+    skill_dir = write_skill(tmp_path, compatibility_raw=raw_block)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V15" in _check_ids(violations)
+
+
+# --------------------------------------------------------------------------- #
+# V16: description opens with the preamble naming the declared harnesses
+# --------------------------------------------------------------------------- #
+
+
+def test_v16_no_compatibility_key_is_valid(tmp_path: Path) -> None:
+    """Without a ``compatibility`` declaration there is no preamble to require."""
+    skill_dir = write_skill(tmp_path)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" not in _check_ids(violations)
+
+
+def test_v16_single_harness_preamble_is_valid(tmp_path: Path) -> None:
+    """One declared harness asks for its display name followed by ``専用。``."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" not in _check_ids(violations)
+
+
+def test_v16_two_harness_preamble_is_valid(tmp_path: Path) -> None:
+    """Two declared harnesses are joined with ``' / '`` in the preamble."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=_harness_description("Codex", "OpenCode"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" not in _check_ids(violations)
+
+
+def test_v16_preamble_in_the_declared_order_is_valid(tmp_path: Path) -> None:
+    """The display names follow the order the ``compatibility`` value lists them in."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode, codex",
+        description=_harness_description("OpenCode", "Codex"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" not in _check_ids(violations)
+
+
+def test_v16_missing_preamble_is_violation(tmp_path: Path) -> None:
+    """A harness-specific skill whose description never says so is reported as V16."""
+    skill_dir = write_skill(tmp_path, compatibility="opencode")
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_preamble_naming_another_harness_is_violation(tmp_path: Path) -> None:
+    """The preamble must name the declared harness, not a different one."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("Codex"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_preamble_with_a_missing_display_name_is_violation(tmp_path: Path) -> None:
+    """Every declared harness has to appear in the preamble, not just the first one."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=_harness_description("Codex"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_preamble_in_the_wrong_order_is_violation(tmp_path: Path) -> None:
+    """Display names in an order the ``compatibility`` value does not use is V16."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=_harness_description("OpenCode", "Codex"),
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_preamble_not_at_the_start_is_violation(tmp_path: Path) -> None:
+    """The preamble opens the description so a truncated listing still shows it."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=f"サンプル。{_harness_description('OpenCode')}",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_misspelled_display_name_is_violation(tmp_path: Path) -> None:
+    """The display name is compared verbatim, so a casing slip is a violation."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=f"Opencode 専用。{DEFAULT_DESCRIPTION}",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+def test_v16_preamble_without_the_separator_spaces_is_violation(tmp_path: Path) -> None:
+    """The join is ``' / '``, so ``'Codex/OpenCode 専用。'`` does not match."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="codex, opencode",
+        description=f"Codex/OpenCode 専用。{DEFAULT_DESCRIPTION}",
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert "V16" in _check_ids(violations)
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    ["OpenCode", "opencode-cli", "opencode, ", "opencode,,codex", "opencode, opencode"],
+    ids=["display-name", "suffixed", "trailing-comma", "double-comma", "duplicate"],
+)
+def test_v16_invalid_compatibility_is_not_double_reported(
+    tmp_path: Path, invalid_value: str
+) -> None:
+    """A value V15 already rejects has no expected preamble, so V16 stays silent."""
+    skill_dir = write_skill(tmp_path, compatibility=invalid_value)
+    check_ids = _check_ids(validate_skill(skill_dir, tmp_path))
+    assert "V15" in check_ids
+    assert "V16" not in check_ids
+
+
+def test_v16_non_string_compatibility_is_not_double_reported(tmp_path: Path) -> None:
+    """A non-string value is reported once, by V15 alone."""
+    skill_dir = write_skill(tmp_path, compatibility_raw="compatibility:\n  - opencode")
+    check_ids = _check_ids(validate_skill(skill_dir, tmp_path))
+    assert "V15" in check_ids
+    assert "V16" not in check_ids
 
 
 # --------------------------------------------------------------------------- #

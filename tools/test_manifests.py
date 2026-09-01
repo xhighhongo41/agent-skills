@@ -54,6 +54,7 @@ def write_skill(
     name: str,
     *,
     version: str | None = DEFAULT_VERSION,
+    compatibility: str | None = None,
     extra_files: dict[str, str] | None = None,
     raw_content: str | None = None,
 ) -> Path:
@@ -68,6 +69,9 @@ def write_skill(
         name: Skill name, used for both the frontmatter and the folder name.
         version: ``metadata.version`` value. ``None`` omits the whole
             ``metadata`` mapping, simulating a skill with no declared version.
+        compatibility: Frontmatter ``compatibility`` value, written as a
+            double-quoted string. ``None`` omits the key, which is what a
+            skill common to every harness looks like.
         extra_files: Mapping of skill-relative path to file content, written
             in addition to ``SKILL.md``.
         raw_content: When given, used verbatim as ``SKILL.md``'s content,
@@ -85,6 +89,8 @@ def write_skill(
         content = raw_content
     else:
         lines = ["---", f"name: {name}"]
+        if compatibility is not None:
+            lines.append(f'compatibility: "{compatibility}"')
         if version is not None:
             lines.append("metadata:")
             lines.append(f'  version: "{version}"')
@@ -311,6 +317,55 @@ def test_build_index_empty_skills_directory_is_empty_list(tmp_path: Path) -> Non
     assert build_index(tmp_path) == {"skills": []}
 
 
+def test_build_index_includes_a_skill_without_compatibility(tmp_path: Path) -> None:
+    """A skill declaring no ``compatibility`` is common to every harness, so it ships."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "common-skill")
+    document = build_index(tmp_path)
+    assert [entry["name"] for entry in document["skills"]] == ["common-skill"]
+
+
+def test_build_index_includes_a_skill_declaring_opencode(tmp_path: Path) -> None:
+    """The manifest serves OpenCode, so a skill naming it is listed."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "opencode-skill", compatibility="opencode")
+    document = build_index(tmp_path)
+    assert [entry["name"] for entry in document["skills"]] == ["opencode-skill"]
+
+
+def test_build_index_includes_a_skill_declaring_opencode_among_others(tmp_path: Path) -> None:
+    """Targeting OpenCode alongside another harness is still targeting OpenCode."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "shared-skill", compatibility="codex, opencode")
+    document = build_index(tmp_path)
+    assert [entry["name"] for entry in document["skills"]] == ["shared-skill"]
+
+
+@pytest.mark.parametrize(
+    "compatibility",
+    ["codex", "claude-code", "claude-code, codex"],
+    ids=["codex", "claude-code", "both-others"],
+)
+def test_build_index_excludes_a_skill_that_does_not_target_opencode(
+    tmp_path: Path, compatibility: str
+) -> None:
+    """A skill written for other harnesses must not be offered to OpenCode."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "elsewhere-skill", compatibility=compatibility)
+    document = build_index(tmp_path)
+    assert document == {"skills": []}
+
+
+def test_build_index_filtering_keeps_the_remaining_skills_in_name_order(tmp_path: Path) -> None:
+    """Filtering removes entries without disturbing the name ordering of the rest."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "zebra-skill", compatibility="opencode")
+    write_skill(tmp_path, "codex-only-skill", compatibility="codex")
+    write_skill(tmp_path, "alpha-skill")
+    document = build_index(tmp_path)
+    assert [entry["name"] for entry in document["skills"]] == ["alpha-skill", "zebra-skill"]
+
+
 # --------------------------------------------------------------------------- #
 # build_marketplace
 # --------------------------------------------------------------------------- #
@@ -368,6 +423,16 @@ def test_build_marketplace_plugin_version_matches_version_file(tmp_path: Path) -
     write_version(tmp_path, "3.4.5\n")
     document = build_marketplace(tmp_path)
     assert document["plugins"][0]["version"] == "3.4.5"
+
+
+def test_build_marketplace_ignores_skill_compatibility(tmp_path: Path) -> None:
+    """The plugin entry enumerates no skill, so harness filtering cannot reach it."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "codex-only-skill", compatibility="codex")
+    document = build_marketplace(tmp_path)
+    assert len(document["plugins"]) == 1
+    assert "skills" not in document["plugins"][0]
+    assert document["plugins"][0]["version"] == DEFAULT_VERSION
 
 
 def test_build_marketplace_missing_version_file_is_error(tmp_path: Path) -> None:
@@ -473,6 +538,16 @@ def test_write_manifests_is_idempotent(tmp_path: Path) -> None:
     write_manifests(tmp_path)
     second_pass = {path: path.read_text(encoding="utf-8") for path, _ in manifest_targets(tmp_path)}
     assert first_pass == second_pass
+
+
+def test_write_manifests_index_omits_skills_that_do_not_target_opencode(tmp_path: Path) -> None:
+    """The file on disk, not just the in-memory document, reflects the filter."""
+    write_version(tmp_path)
+    write_skill(tmp_path, "common-skill")
+    write_skill(tmp_path, "codex-only-skill", compatibility="codex")
+    write_manifests(tmp_path)
+    document = json.loads((tmp_path / INDEX_RELPATH).read_text(encoding="utf-8"))
+    assert [entry["name"] for entry in document["skills"]] == ["common-skill"]
 
 
 def test_write_manifests_returns_the_written_paths(tmp_path: Path) -> None:

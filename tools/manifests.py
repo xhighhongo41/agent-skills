@@ -82,6 +82,12 @@ PLUGIN_SOURCE = "./"
 #: One-line summary shown in the plugin browser.
 PLUGIN_DESCRIPTION = "Agent Skills for coding agents, kept in one place."
 
+#: Harness served by ``skills/index.json``, as a key of
+#: :data:`validate.KNOWN_HARNESSES`.  A skill that restricts itself to other
+#: harnesses is not offered here; the vocabulary itself (which keys exist, how
+#: the value is spelled) lives in :mod:`validate` and is not repeated below.
+INDEX_HARNESS = "opencode"
+
 #: Directory names never listed in a skill's ``files``.
 EXCLUDED_DIR_NAMES = frozenset({"__pycache__"})
 
@@ -199,15 +205,44 @@ def collect_skill_files(skill_dir: Path) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
+def _targets_index_harness(doc: validate.SkillDoc) -> bool:
+    """Return whether a skill belongs in the OpenCode manifest.
+
+    A skill that declares no ``compatibility`` works everywhere, so it ships.
+    One that declares a list ships only when the list names
+    :data:`INDEX_HARNESS`.  A declaration that is present but unusable (a
+    non-string value) names nothing, so it does not qualify either; ``V15``
+    reports that value as the defect it is.
+
+    Args:
+        doc: The parsed ``SKILL.md``.
+
+    Returns:
+        ``True`` when the skill may be listed in ``skills/index.json``.
+    """
+    if "compatibility" not in doc.frontmatter:
+        return True
+    value = doc.declared_compatibility
+    if value is None:
+        return False
+    return INDEX_HARNESS in validate.parse_compatibility(value)
+
+
 def build_index(repo_root: Path) -> dict[str, Any]:
     """Build the OpenCode manifest.
+
+    Only the skills this manifest may serve are listed: one that restricts
+    itself with ``compatibility`` to harnesses other than :data:`INDEX_HARNESS`
+    is left out.  The requirements every skill must meet are checked first, so
+    an omitted skill is still refused when it cannot be parsed or declares no
+    version — being unlisted is not a way to escape them.
 
     Args:
         repo_root: Repository root (the directory containing ``skills/``).
 
     Returns:
         The manifest as ``{"skills": [{"name", "version", "files"}, ...]}``,
-        with skills in name order.
+        with skills in name order.  ``{"skills": []}`` when no skill qualifies.
 
     Raises:
         ManifestError: When a skill cannot be parsed or declares no version.
@@ -225,6 +260,9 @@ def build_index(repo_root: Path) -> dict[str, Any]:
         version = doc.declared_version
         if version is None:
             raise ManifestError(f"{doc.rel_path} has no 'metadata.version'.")
+
+        if not _targets_index_harness(doc):
+            continue
 
         name = doc.declared_name if doc.declared_name is not None else skill_dir.name
         entries.append({"name": name, "version": version, "files": collect_skill_files(skill_dir)})
