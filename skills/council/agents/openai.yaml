@@ -1,0 +1,4 @@
+interface:
+  display_name: "円卓合議"
+  short_description: "合議による良質な議論"
+  default_prompt: "$council を使って、方針を設計してください。"

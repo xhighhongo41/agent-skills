@@ -11,7 +11,7 @@ found.  Every violation is reported before exiting so that a whole batch can be
 fixed in a single pass instead of one error per run.
 
 The conventions enforced here come from ``開発資料/v0.1実装計画.md`` section 4-5.
-Each check has a stable identifier (``V00``..``V14``) so that a report line can be
+Each check has a stable identifier (``V00``..``V16``) so that a report line can be
 traced back to the requirement it protects.
 
 ``V13``/``V14`` cover the generated install manifests rather than a single skill.
@@ -103,6 +103,34 @@ DENYLIST: tuple[str, ...] = (
     "Codex用",
 )
 
+#: Harness keys accepted in the ``compatibility`` frontmatter value, mapped to
+#: the display name that names the harness in prose.  A skill omits the key when
+#: it works everywhere, so this table only lists what a *restricted* skill may
+#: declare.
+KNOWN_HARNESSES: dict[str, str] = {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode",
+}
+
+#: The denylisted phrase each harness owns.  Naming a harness the skill does not
+#: target is exactly what the generalisation policy removes, but a skill that
+#: declares the harness in ``compatibility`` is *about* that harness, so its own
+#: phrase stops being a leftover.  The phrases stay in :data:`DENYLIST`; V11
+#: drops them from the scan per skill instead, which keeps the exemption tied to
+#: the declaration rather than weakening the list for everyone.
+HARNESS_DENYLIST_TERMS: dict[str, str] = {
+    "claude-code": "Claude用",
+    "codex": "Codex用",
+    "opencode": "OpenCode用",
+}
+
+#: Separator between display names in the description preamble V16 requires.
+HARNESS_DISPLAY_SEPARATOR = " / "
+
+#: Text that closes the preamble, after the joined display names.
+HARNESS_PREAMBLE_SUFFIX = " 専用。"
+
 
 # --------------------------------------------------------------------------- #
 # Data structures
@@ -172,6 +200,17 @@ class SkillDoc:
             return None
         version = metadata.get("version")
         return version if isinstance(version, str) else None
+
+    @property
+    def declared_compatibility(self) -> str | None:
+        """Return the frontmatter ``compatibility`` when it is a string, else ``None``.
+
+        ``None`` therefore means "no usable value", which covers both a missing
+        key and a value of the wrong type; callers that must tell those apart
+        test ``"compatibility" in frontmatter`` as well.
+        """
+        compatibility = self.frontmatter.get("compatibility")
+        return compatibility if isinstance(compatibility, str) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -290,6 +329,25 @@ def load_skill(skill_dir: Path, repo_root: Path) -> tuple[SkillDoc | None, list[
     return doc, []
 
 
+def parse_compatibility(value: str) -> list[str]:
+    """Split a ``compatibility`` value into its comma-separated elements.
+
+    Surrounding whitespace is removed from each element, so ``"a , b"`` and
+    ``"a,b"`` describe the same pair.  Nothing else is normalised: the elements
+    are returned as written (case included) and in the declared order, because
+    both matter to the checks that consume them.
+
+    Args:
+        value: The raw ``compatibility`` string.
+
+    Returns:
+        The stripped elements, in declaration order.  A malformed value keeps
+        its empty elements (``"a,"`` yields ``["a", ""]``) so that the caller
+        can report them rather than silently dropping them.
+    """
+    return [element.strip() for element in value.split(",")]
+
+
 # --------------------------------------------------------------------------- #
 # Checks
 # --------------------------------------------------------------------------- #
@@ -316,6 +374,28 @@ def _is_description_quoted(doc: SkillDoc) -> bool:
             value = stripped[len("description:") :].strip()
             return len(value) >= 2 and value.startswith('"') and value.endswith('"')
     return False
+
+
+def _declared_harnesses(doc: SkillDoc) -> list[str] | None:
+    """Return the harness keys a skill declares, or ``None`` when there are none usable.
+
+    ``None`` covers both "no ``compatibility`` key" and "a value V15 rejects":
+    in neither case is there a declaration another check may act on.  Keeping
+    that decision in one place is what stops V16 from restating a V15 failure
+    and stops a malformed value from exempting a denylisted phrase.
+    """
+    if "compatibility" not in doc.frontmatter:
+        return None
+    value = doc.declared_compatibility
+    if value is None:
+        return None
+    harnesses = parse_compatibility(value)
+    # An empty element is not a key, so the unknown-key test rejects it too.
+    if any(harness not in KNOWN_HARNESSES for harness in harnesses):
+        return None
+    if len(set(harnesses)) != len(harnesses):
+        return None
+    return harnesses
 
 
 def check_frontmatter_keys(doc: SkillDoc) -> list[Violation]:
@@ -537,9 +617,21 @@ def check_usage_declaration(doc: SkillDoc) -> list[Violation]:
 
 
 def check_denylist(doc: SkillDoc) -> list[Violation]:
-    """V11: no agent-specific proper noun, private name or personal path remains."""
+    """V11: no agent-specific proper noun, private name or personal path remains.
+
+    A skill that declares ``compatibility`` is written for the harnesses it
+    names, so naming them is documentation rather than a leftover: the phrase
+    owned by each declared harness is removed from the scanned terms for that
+    skill alone.  Every other denylisted term — subagent names, personal paths,
+    the phrase of an undeclared harness — is still scanned, and a declaration
+    V15 rejects exempts nothing at all.
+    """
+    declared = _declared_harnesses(doc) or []
+    exempt = {HARNESS_DENYLIST_TERMS[harness] for harness in declared}
+    scanned = tuple(term for term in DENYLIST if term not in exempt)
+
     violations = []
-    for term in DENYLIST:
+    for term in scanned:
         line = None
         for offset, source_line in enumerate(doc.frontmatter_lines):
             if term in source_line:
@@ -616,6 +708,101 @@ def check_openai_yaml(doc: SkillDoc, repo_root: Path) -> list[Violation]:
             )
         )
     return violations
+
+
+def check_compatibility(doc: SkillDoc) -> list[Violation]:
+    """V15: ``compatibility`` names known harnesses, each exactly once.
+
+    The key is optional: omitting it is how a skill says "every harness". When
+    it is present it drives both the install manifests and the V11 exemption,
+    so a value no installer can act on is an error rather than a hint.
+    """
+    if "compatibility" not in doc.frontmatter:
+        return []
+
+    line = _find_frontmatter_line(doc, "compatibility:")
+    value = doc.declared_compatibility
+    if value is None:
+        found = doc.frontmatter["compatibility"]
+        return [
+            Violation(
+                doc.rel_path,
+                line,
+                "V15",
+                "'compatibility' must be a comma-separated string of harness keys, "
+                f"found {type(found).__name__}.",
+            )
+        ]
+
+    harnesses = parse_compatibility(value)
+    violations = []
+    if any(not harness for harness in harnesses):
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V15",
+                f"'compatibility' {value!r} has an empty element; write the keys as "
+                "'a, b' without a leading, trailing or doubled comma.",
+            )
+        )
+    unknown = sorted(
+        {harness for harness in harnesses if harness and harness not in KNOWN_HARNESSES}
+    )
+    if unknown:
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V15",
+                f"'compatibility' names unknown harness(es) {unknown}; the accepted "
+                f"keys are {sorted(KNOWN_HARNESSES)}.",
+            )
+        )
+    duplicates = sorted(
+        {harness for harness in harnesses if harness and harnesses.count(harness) > 1}
+    )
+    if duplicates:
+        violations.append(
+            Violation(
+                doc.rel_path,
+                line,
+                "V15",
+                f"'compatibility' names {duplicates} more than once.",
+            )
+        )
+    return violations
+
+
+def check_compatibility_preamble(doc: SkillDoc) -> list[Violation]:
+    """V16: the description opens by naming the declared harnesses.
+
+    A restricted skill is listed next to unrestricted ones, so the restriction
+    has to be visible in the description itself — and at its start, because a
+    listing that truncates the text keeps only the opening.
+
+    Nothing is reported when the declaration is missing or already rejected by
+    V15: without a usable list there is no preamble to expect, and repeating the
+    same defect under a second identifier would only hide the real cause.
+    """
+    harnesses = _declared_harnesses(doc)
+    if harnesses is None:
+        return []
+
+    display_names = [KNOWN_HARNESSES[harness] for harness in harnesses]
+    expected = HARNESS_DISPLAY_SEPARATOR.join(display_names) + HARNESS_PREAMBLE_SUFFIX
+    description = doc.frontmatter.get("description")
+    if isinstance(description, str) and description.startswith(expected):
+        return []
+    return [
+        Violation(
+            doc.rel_path,
+            _find_frontmatter_line(doc, "description:"),
+            "V16",
+            f"Description must start with {expected!r} because 'compatibility' "
+            f"declares {harnesses}.",
+        )
+    ]
 
 
 def check_manifest_drift(repo_root: Path) -> list[Violation]:
@@ -835,6 +1022,8 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
     violations.extend(check_usage_declaration(doc))
     violations.extend(check_denylist(doc))
     violations.extend(check_openai_yaml(doc, repo_root))
+    violations.extend(check_compatibility(doc))
+    violations.extend(check_compatibility_preamble(doc))
     return violations
 
 
