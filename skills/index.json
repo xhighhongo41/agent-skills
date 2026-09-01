@@ -3,6 +3,7 @@
     {
       "name": "council",
       "version": "1.0.0",
+      "compatibility": "opencode",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
