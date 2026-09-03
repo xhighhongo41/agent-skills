@@ -53,7 +53,7 @@
     },
     {
       "name": "version-implement",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
