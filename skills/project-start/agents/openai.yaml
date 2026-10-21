@@ -1,0 +1,4 @@
+interface:
+  display_name: "プロジェクト開始"
+  short_description: "新規プロジェクトの初期設定を整える"
+  default_prompt: "$project-start を使って、このプロジェクトのリモート・アカウント・識別子・文書構成・ライセンス・.gitignore を整えてください。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "外部スキルの取り込み"
+  short_description: "他者のリポジトリのスキルを自エージェントに取り込む"
+  default_prompt: "$register-external-skill を使って、指定したリポジトリのスキルを列挙し、選んだものを取り込んでください。"

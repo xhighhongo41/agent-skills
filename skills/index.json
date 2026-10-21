@@ -28,6 +28,14 @@
       ]
     },
     {
+      "name": "project-start",
+      "version": "1.0.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
       "name": "python-coding",
       "version": "1.1.0",
       "files": [
@@ -36,8 +44,24 @@
       ]
     },
     {
+      "name": "register-external-skill",
+      "version": "1.0.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "remove-skill",
+      "version": "1.0.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
       "name": "skill-sync",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -53,14 +77,6 @@
     },
     {
       "name": "version-implement",
-      "version": "1.2.0",
-      "files": [
-        "SKILL.md",
-        "agents/openai.yaml"
-      ]
-    },
-    {
-      "name": "version-release",
       "version": "1.3.0",
       "files": [
         "SKILL.md",
@@ -68,8 +84,16 @@
       ]
     },
     {
-      "name": "version-start",
+      "name": "version-release",
       "version": "1.4.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "version-start",
+      "version": "1.5.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"

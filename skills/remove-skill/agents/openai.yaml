@@ -1,0 +1,4 @@
+interface:
+  display_name: "スキルの削除"
+  short_description: "導入済みスキルを自エージェントから削除する"
+  default_prompt: "$remove-skill を使って、指定したスキルを自エージェントの置き場から削除してください。"
