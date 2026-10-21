@@ -36,6 +36,22 @@
       ]
     },
     {
+      "name": "register-external-skill",
+      "version": "1.0.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "remove-skill",
+      "version": "1.0.0",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
       "name": "skill-sync",
       "version": "1.5.0",
       "files": [
