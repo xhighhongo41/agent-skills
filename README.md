@@ -53,7 +53,9 @@ you work test-first is your policy, not a skill's, so `version-implement` leaves
 the implementation style to your global instructions. That means you can write
 "we develop test-first" there and leave the procedure itself to this skill.
 
-`council` is the one skill that names an agent. It needs subagents backed by
+`council` is one of the three skills that name an agent — all three are for
+OpenCode, the other two being `plugin-update-check` and `plugin-update-apply`.
+`council` needs subagents backed by
 *different* models — different from each other and from the chair, preferably
 from different developers — to be worth running, and OpenCode is where you can point
 subagents at several providers. Skills like this declare their target in the
