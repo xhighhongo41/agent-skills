@@ -61,10 +61,13 @@
     },
     {
       "name": "skill-sync",
-      "version": "1.5.0",
+      "version": "2.0.0",
       "files": [
         "SKILL.md",
-        "agents/openai.yaml"
+        "agents/openai.yaml",
+        "references/audit.md",
+        "references/contents.md",
+        "references/external.md"
       ]
     },
     {
