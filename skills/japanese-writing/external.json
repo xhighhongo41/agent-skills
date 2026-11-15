@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "externals": [
+    {
+      "name": "natural-japanese",
+      "origin": "https://github.com/coji/natural-japanese",
+      "path": "skills/natural-japanese",
+      "include": [
+        "SKILL.md",
+        "references/doctypes/",
+        "assets/style-profile-template.md"
+      ]
+    },
+    {
+      "name": "yomiyasu",
+      "origin": "https://github.com/nanaism/yomiyasu",
+      "path": "skills/yomiyasu",
+      "include": [
+        "SKILL.md",
+        "references/",
+        "scripts/yomiyasu_check.py",
+        "scripts/yomiyasu_lint.py",
+        "scripts/yomiyasu_diff.py",
+        "scripts/markdown_visibility.py"
+      ]
+    }
+  ]
+}
