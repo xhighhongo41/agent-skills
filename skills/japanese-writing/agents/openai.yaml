@@ -1,0 +1,4 @@
+interface:
+  display_name: "日本語の文書"
+  short_description: "日本語の文書を段階を分けて書く・直す"
+  default_prompt: "$japanese-writing を使って、この日本語の文書を書いて（または直して）ください。"

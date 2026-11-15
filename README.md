@@ -27,22 +27,24 @@ Any other tool that reads the Agent Skills format should work too.
 
 | Skill | Works with | What it does |
 |---|---|---|
-| `python-coding` | any | Applies a consistent Python style — PEP 8/257/484, type hints, docstrings, single responsibility — when writing or reviewing Python. Tests follow the project's written policy, then the style of its existing tests, and default to pytest when there is neither. Also covers exceptions, standard-library idioms, imports, and configuration and secrets. |
+| `python-coding` | any | Applies a consistent Python style (PEP 8/257/484, type hints, docstrings, single responsibility) when writing or reviewing Python. Tests follow the project's written policy, then the style of its existing tests, and default to pytest when there is neither. Also covers exceptions, standard-library idioms, imports, and configuration and secrets. |
 | `test-driven-development` | any | Writes the tests first: signature, tests, a run that confirms they fail, then the implementation. Covers new work, updates and bug fixes, and says what to do when a test itself looks wrong. |
+| `japanese-writing` | any | Writes and revises Japanese documents in stages. Structure, content and style are settled before and during drafting; the draft is then polished one spot at a time and checked with a script. Each stage reads a different external skill as reference material (natural-japanese for writing, yomiyasu for polishing), and the skill says what to do where the two disagree. Meant for documents saved to files, or for when you ask for it by name, not for everyday replies. |
+| `english-writing` | any | The same for English documents. The agreement on reader, goal, document type and scope, and the writing rules, come from technical-documentation; the finished draft goes through humanizer, which removes the habits typical of AI-written prose. Facts are checked against primary sources before the polish, and nothing the sources do not support is added. The skill's own instructions are in Japanese. |
 | `project-start` | any | Sets up a new project: works out whether the directory was cloned or created locally, matches the hosting CLI's active account and the commit identity to the repository owner, lays out the progress document and the untracked notes folder, writes the agent instruction file, picks a license and a `.gitignore`, and makes the first commit and push. Every step inspects the current state first, so running it again after completion or an interruption is safe. |
 | `version-start` | any | Opens a new version: first checks where the version stands (untouched, already started, already released, a skipped or foreign number), then reads the project docs and the handover document, surveys the codebase, creates the branch, and drafts an implementation plan. Raises only the Critical handovers; asks its questions in plain language, with code names only as a footnote. Resumes a design that was interrupted. Stops before implementing. |
 | `version-implement` | any | Drives a fixed plan to completion: an entry gate that checks the version's state, a cycle per task, a decision tree that says when to keep going and when to stop and ask. Sorts the handovers it leaves into Critical / Recommended / Optional. After an interruption it reconciles the record with the commits and resumes from the right task, never discarding uncommitted work. |
 | `version-release` | any | Runs the release checklist: an entry gate that refuses a version not yet implemented or already released and resumes an interrupted release from the first unfinished gate, then version-bump detection, a check that everything published *from* the repo (package and container registries, static hosting, manifests fetched by URL) will carry the new version, doc sync, verification, PR, merge, tag, draft release notes, and a sweep of the handover document that drops what the release made obsolete. |
-| `skill-sync` | any | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick — inside its own agent's config directory only. A skill that names a target agent is checked against the agent running it, so one meant for somewhere else stays out of the candidates. A copy whose version matches but whose content does not is reported as *content differs* and left out of the update by default. Remembers, per agent, which skills you want and which you don't, so an unwanted skill is not offered again on every run. Skills registered from other repositories are checked against their origin — by version when they have one, by a digest of the body when they don't. |
-| `register-external-skill` | any | Brings a skill published in someone else's repository into your agent: clones the repository, lists the skills it carries, flags the ones meant for a different agent, patches only the frontmatter when it is missing or inconsistent — the body is never touched — and records where the skill came from under `metadata`, so `skill-sync` can check it for updates later. |
-| `remove-skill` | any | Deletes an installed skill from the running agent's own skills directory after showing you what it is about to remove, and keeps `skill-sync.json` consistent. Skills that live in another agent's directory, a distribution cache or a plugin's managed area are left alone, with a pointer to the proper way to remove them. |
-| `council` | **OpenCode only** | Runs a round table: several *different* models — none the same as the chair's, preferably from different developers — think about the same question independently. Points they all agree on are settled right away, ending the council early when nothing is left; the rest go through cross-reviews kept in separate files and each participant's answer to the reviews of its own write-up, and the chair (the main session) merges everything into one decision. A participant that loses control is replaced by another model. Each participant keeps one session throughout, and fetched material is shared through a catalogue. |
-| `plugin-update-check` | **OpenCode only** | Checks the npm plugins named in your config against the registry and reports which ones have a newer version. Judgement only — it changes nothing. |
+| `skill-sync` | any | Lists which agent on your machine holds which version of each skill, compares against this repository, and updates the ones you pick, writing only inside its own agent's config directory. The comparison covers every file in a skill's folder, scripts and reference documents included. A copy whose version matches but whose content does not is reported as *content differs* and left out of the update by default. A skill that names a target agent is checked against the agent running it, so one meant for somewhere else stays out of the candidates. Remembers, per agent, which skills you want and which you don't, so an unwanted skill is not offered again on every run. Skills registered from other repositories are checked against their origin: an update is reported when the origin's version, the body or any bundled file has changed. When a skill declares external references (material it reads from other authors' repositories), `skill-sync` fetches them at install time and keeps them current. Before it places anything it has fetched, it audits the new and changed files and reports its concerns. |
+| `register-external-skill` | any | Brings a skill published in someone else's repository into your agent: clones the repository, lists the skills it carries, flags the ones meant for a different agent, audits what it is about to place and reports its concerns, and patches only the frontmatter when it is missing or inconsistent (the body is never touched). It records where the skill came from under `metadata`, and a checksum list of the skill's other files inside the skill's folder, so `skill-sync` can check all of it for updates later. |
+| `remove-skill` | any | Deletes an installed skill from the running agent's own skills directory after showing you what the folder holds: the skill and its bundled files, fetched references, caches and temporary files, and the placement records. It removes the whole folder, confirms that nothing is left, and keeps `skill-sync.json` consistent. Skills that live in another agent's directory, a distribution cache or a plugin's managed area are left alone, with a pointer to the proper way to remove them. |
+| `council` | **OpenCode only** | Runs a round table: several *different* models (none the same as the chair's, preferably from different developers) think about the same question independently. Points they all agree on are settled right away, ending the council early when nothing is left; the rest go through cross-reviews kept in separate files and each participant's answer to the reviews of its own write-up, and the chair (the main session) merges everything into one decision. A participant that loses control is replaced by another model. Each participant keeps one session throughout, and fetched material is shared through a catalogue. |
+| `plugin-update-check` | **OpenCode only** | Checks the npm plugins named in your config against the registry and reports which ones have a newer version. Judgement only: it changes nothing. |
 | `plugin-update-apply` | **OpenCode only** | Applies a plugin update by clearing its cache so the next start installs the new version. Asks for explicit approval before deleting anything. |
 
 The three `version-*` skills form a workflow (start → implement → release) built around a
 `PROJECT.md` progress document. They make no assumption about your language or
-stack — everything is discovered from your project's own documents. Handovers between
+stack: everything is discovered from your project's own documents. Handovers between
 versions live in one document, tiered as Critical / Recommended / Optional; only the
 Critical ones are raised when a version starts, and the progress document keeps a single
 short entry per version that each phase updates. `project-start` sets up the project
@@ -53,11 +55,20 @@ you work test-first is your policy, not a skill's, so `version-implement` leaves
 the implementation style to your global instructions. That means you can write
 "we develop test-first" there and leave the procedure itself to this skill.
 
-`council` is one of the three skills that name an agent — all three are for
+`japanese-writing` and `english-writing` work in stages, and each stage reads a
+skill published by another author as reference material: one for writing, one for
+polishing the draft. The two skills here add what the references do not settle when
+used together: which one applies at which stage, and what to do when they disagree.
+The reference material is not part of this repository. `skill-sync` fetches it from
+the authors' repositories when it installs the skill. The **External references**
+paragraph under [Updating](#updating) explains how, and
+[Acknowledgements](#acknowledgements) lists the four sources.
+
+`council` is one of the three skills that name an agent. All three are for
 OpenCode, the other two being `plugin-update-check` and `plugin-update-apply`.
 `council` needs subagents backed by
-*different* models — different from each other and from the chair, preferably
-from different developers — to be worth running, and OpenCode is where you can point
+*different* models (different from each other and from the chair, preferably
+from different developers) to be worth running, and OpenCode is where you can point
 subagents at several providers. Skills like this declare their target in the
 `compatibility` field of their frontmatter and say so at the start of their
 `description`, so your agent can see what a skill is for before loading it.
@@ -81,8 +92,15 @@ Routes **D** and **E** install every skill at once. **A**, **B** and **C** take 
 > `skills/index.json`, which lists only the skills that work with OpenCode, so
 > nothing agent-specific arrives that OpenCode cannot use. Route **E** is a plugin
 > and always scans the whole `skills/` folder, so `council` is installed into
-> Claude Code too — it is inert there, and you can ignore it. With **A**, **B** and
+> Claude Code too. It is inert there, and you can ignore it. With **A**, **B** and
 > **C** you pick each skill yourself; check the **Works with** column first.
+
+> **Two skills need `skill-sync` to finish installing.** `japanese-writing` and
+> `english-writing` read reference material that this repository does not contain.
+> Whichever route you use, run `skill-sync` afterwards. It fetches the material
+> from the authors' repositories. Until then, each of the two skills stops at its
+> first step and names what is missing. For details, see **External references**
+> under [Updating](#updating).
 
 ### Option A — Ask your agent to do it (easiest)
 
@@ -95,7 +113,7 @@ and place it in your user skills directory.
 ```
 
 If your agent doesn't know where its skills live, give it the path from the
-**Supported agents** table above.
+**Supported agents** table.
 
 ### Option B — Copy it yourself
 
@@ -113,9 +131,9 @@ cp -r skills/python-coding ~/.codex/skills/
 cp -r skills/python-coding ~/.config/opencode/skills/
 ```
 
-Copy the whole folder, not just `SKILL.md` — each skill ships a small
+Copy the whole folder, not just `SKILL.md`: each skill ships a small
 `agents/openai.yaml` that gives Codex a display name and an example prompt.
-Other agents simply ignore it.
+Other agents ignore it.
 
 ### Option C — Codex `skill-installer`
 
@@ -139,7 +157,7 @@ Point it at the manifest directory in your `opencode.json`:
 }
 ```
 
-OpenCode v2 — the separate `opencode2` binary — takes a flat array instead:
+OpenCode v2 (the separate `opencode2` binary) takes a flat array instead:
 
 ```json
 {
@@ -163,7 +181,7 @@ tag such as `v1.0.0`.
 That installs every skill as a single plugin. Two things differ from the other routes:
 
 - **The skills are namespaced.** Invoke them as `/agent-skills:python-coding`,
-  not `/python-coding`. If you want the bare name, use Option A or B — a plugin
+  not `/python-coding`. If you want the bare name, use Option A or B. A plugin
   copy and a personal copy can coexist without overriding each other.
 - **Auto-update is off by default** for third-party marketplaces. Run
   `/plugin marketplace update xhighhongo41-agent-skills` when you want the
@@ -185,14 +203,14 @@ If you installed through the plugin marketplace (Option E), the name is
 Each skill announces itself on first use, for example:
 
 ```
-python-coding スキル v1.1.0 を使用します
+python-coding スキル v1.1.1 を使用します
 ```
 
 That line tells you the skill really loaded and which version you have.
 
 ## Recommended: give your agent a role-to-subagent mapping
 
-These skills delegate work to subagents **by role**, never by name — for example
+These skills delegate work to subagents **by role**, never by name: for example
 "解析専任サブエージェント" (the analysis specialist) or "読解役サブエージェント"
 (the document reader). They have to: a distributed skill cannot know which
 subagents exist on your machine.
@@ -222,7 +240,7 @@ When a skill refers to a subagent by role, use these:
 ```
 
 This is optional. Without it the agent falls back to whatever general-purpose
-subagent it has, which still works — it just picks less precisely.
+subagent it has, which still works, but it picks less precisely.
 
 ## If you use both Claude Code and OpenCode
 
@@ -235,14 +253,14 @@ it twice. To turn that off, set `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`.
 | Route | What to do |
 |---|---|
 | **A**, **B** | Re-run the install; it overwrites the previous copy |
-| **C** | Ask `skill-installer` again — it has no version comparison, so reinstalling *is* the update |
+| **C** | Ask `skill-installer` again. It has no version comparison, so reinstalling *is* the update |
 | **D** | Nothing. OpenCode refetches a skill when its version changes |
 | **E** | `/plugin marketplace update xhighhongo41-agent-skills` |
 
-To find out what you actually have, use the **`skill-sync`** skill from this
+To find out what you have, use the `skill-sync` skill from this
 repository. It reports the versions you have installed, compares them against
 this repository's `index.json`, checks the content of copies whose version
-already matches, and — once you approve — fetches and places the copies that
+already matches, and, once you approve, fetches and places the copies that
 are out of date. You can limit it to a single skill or let it cover
 everything.
 
@@ -259,13 +277,52 @@ proposed as the initial values and written once you confirm.
 will not update another agent's skills on your behalf; to update a different
 agent, run `skill-sync` from that agent.
 
+**External references.** A skill can declare, in an `external.json` file in its
+folder, material that it reads from other authors' repositories. `japanese-writing`
+and `english-writing` each declare two skills; [Acknowledgements](#acknowledgements)
+lists them. That material is not in this repository. When `skill-sync` installs or
+updates such a skill, it clones each declared repository, takes the part that the
+declaration names plus the license files, and places them in `external/` inside
+the skill's folder. The reference's own `SKILL.md` is stored as `SKILL.upstream.md`,
+so your agent does not load it as a separate skill. On later runs `skill-sync`
+checks each source and offers an update when a file it takes has changed. If a
+file disappears upstream, your copy of it stays; `skill-sync` reports it and asks
+whether to delete it.
+
+References can be placed only in a copy that lives in the agent's own skills
+directory. A copy installed through OpenCode's `skills.urls` (route **D**) or the
+Claude Code marketplace (route **E**) sits in an area that `skill-sync` does not
+write to. For such a copy, `skill-sync` offers to install a second copy into your
+own skills directory, and that copy receives the references.
+
+**An audit before anything is placed.** Skills and references written by other
+people can contain instructions or scripts that cause harm, or scripts that cannot
+run on your machine. Before `skill-sync` places fetched content, it reads the
+files that are new or that differ from your copy, and it reports its findings
+along with the list it asks you to approve. This applies to skills from this
+repository, skills from other repositories and references alike. Each finding
+falls into one of three classes: suspected harm, unlikely to work in this
+environment, or worth knowing before you decide. The audit only reads. It never
+runs what it examines and does not follow instructions it finds there. By default
+`skill-sync` skips a target with a suspected-harm finding, and answering "all of
+them" does not select it; to place it, name it. `register-external-skill` runs the same
+audit. The audit is a static reading and does not guarantee that the content is
+safe.
+
+**Upgrading from a release before 3.0.0.** A `skill-sync` older than 2.0.0 does
+not fetch references. Update `skill-sync` first, restart your agent so that it
+loads the new version, and then run `skill-sync` again. The second run fetches
+the references.
+
 **Skills from other repositories.** `register-external-skill` installs a skill published
-elsewhere into the running agent's own skills directory and records its origin —
-repository, path, ref, commit and a digest of the `SKILL.md` body — under `metadata` in
-the skill's frontmatter. `skill-sync` then checks those skills too: it fetches the origin,
-compares the digest with what was recorded and with your copy, and reports *up to date*,
-*update available* or *content differs* (your copy was edited, or both sides changed).
-`remove-skill` deletes a skill from that directory after confirmation.
+elsewhere into the running agent's own skills directory. It records the origin
+(repository, path, ref, commit and a digest of the `SKILL.md` body) under `metadata` in
+the skill's frontmatter, and a checksum list of the skill's other files in a
+`.skill-sync/` folder inside the skill. `skill-sync` then checks those skills too: it
+fetches the origin, compares the body and the other files with what was recorded and
+with your copy, and reports *up to date*, *update available* or *content differs* (your
+copy was edited, or both sides changed). `remove-skill` deletes a skill's whole folder
+from that directory after confirmation, fetched references included.
 
 ## Versioning
 
@@ -283,33 +340,50 @@ major, a new step bumps the minor, wording fixes bump the patch.
 The repository itself is versioned separately, in the top-level `VERSION` file
 and in the release tags. That is the number the Claude Code plugin reports.
 
-**The repository version bumps whenever any skill changes — even just one**, and
+**The repository version bumps whenever any skill changes, even one**, and
 it follows the largest change in the release: a skill's major bump makes it a
 major release, a minor a minor, patches a patch. Plugin users only see an update
-when this number moves, so it is never left behind while skills quietly drift
-forward. CI enforces this: a change under `skills/` with no matching version bump
+when this number moves, so it moves whenever a skill does.
+CI enforces this: a change under `skills/` with no matching version bump
 fails the build.
 
 ## Changelog
 
 | Version | What changed |
 |---|---|
-| **2.1.0** | `council` 1.3.0 wastes less time and keeps opinions independent. After the first stage the chair settles every point all participants agree on — merging the best details of each write-up — and stops there when nothing is left to debate; a point it doubts can still go to review. Cross-reviews are now one file per write-up and reviewer, so no reviewer reads another's review. Participants are picked to differ from the chair's model and, where possible, from each other's developer, and one that loses control or breaks the rules is replaced by a different model. All files of one council — write-ups, reviews, agreed points, the final decision and the shared material — now live in one folder per topic. The continuation table covers both OpenCode 1.x (`task` / `task_id`) and 2.x (`subagent` / `sessionID`). |
-| 2.0.0 | Three new skills. `project-start` sets up a new project end to end — whether the directory was cloned or created locally, the hosting CLI's account and the commit identity matched to the repository owner, the progress document and notes folder, the agent instruction file, license, `.gitignore`, first commit and push — and can be re-run safely because every step inspects the current state first. `register-external-skill` brings a skill from someone else's repository into the running agent, patching only the frontmatter and recording the origin under `metadata`; `remove-skill` deletes a skill after confirmation and keeps `skill-sync.json` consistent. `skill-sync` 1.5.0 checks registered external skills against their origin — by version when there is one, by a digest of the body when there is not — with an origin column in the listing and the eight states unchanged. The three version skills now sort handovers into Critical / Recommended / Optional, keep them in one handover document, raise only the Critical ones when a version starts, and keep a single short entry per version in the progress document instead of appending one per phase. Twelve skills in all. |
-| 1.9.0 | `skill-sync` now remembers, per agent, which skills you want and which you don't. The answers live in a small `skill-sync.json` directly under the config directory of the agent that ran it — never inside the agent's own settings file — so an unwanted skill stops being offered on every run. A wanted skill that is not installed is offered explicitly; one that is installed but marked unwanted is listed, left in place and not updated unless you name it. On the first run the current install state is proposed as the initial values and written once you confirm; a skill the file does not know about is asked about the same way; an unreadable file is reported and never overwritten. The eight states are unchanged — the setting is shown as a column. |
-| 1.8.0 | `python-coding` gains a section on writing tests. The style is decided in a fixed order — the project's written policy first, then the style of its existing tests, and pytest only when there is neither — so a new test never introduces a second framework into a suite. When pytest is the answer, ten rules cover discovery names, layout, bare `assert`, `pytest.raises`, `parametrize`, fixtures, `conftest.py`, isolation and skips; whether to write tests first is left to you. Seven standing guidelines are added — type hints matched to the project's Python version, exceptions, standard-library idioms, module layout and imports, using the project's own tooling, configuration and secrets, and typed data structures — and the skill now opens with a priority rule: the project's written conventions win, then its existing code, then the skill's defaults. |
-| 1.7.0 | `council` now keeps each participant's subagent session alive through all three stages: the cross-review and the answer stage are follow-up prompts to the session that wrote the original write-up, so what it read and why it decided stays in context. When a session cannot be continued, a fresh instance of the same participant is started and reads its own write-up to catch up. Material fetched during a council — abstracts, papers, manuals — now goes into a per-topic folder with a catalogue of what each file is and where it came from; participants check the catalogue before searching, so the same source is not downloaded three times. `skill-sync` now compares content as well as versions: a copy whose version matches the distribution but whose files do not is reported as *content differs*, with the file names and the size of the difference, and is left out of the update until you confirm it one by one. |
-| 1.6.0 | The three version-management skills now check where a version stands before doing anything. `version-start`, `version-implement` and `version-release` read the same seven-state model — untouched, being designed, designed, being implemented, implemented, being released, released — from the branches, tags, plan, record and progress document, print a summary, and go ahead without asking when the state is the one they expect. They ask only when something is off: a version that skips over a lower one still unreleased, a number that belongs to no version of this project, a version already started or already released. Each skill also resumes its own interrupted run: `version-start` finishes a half-written plan without recreating the branch, `version-implement` reconciles the record with the commits on the branch and continues from the right task without discarding uncommitted work, and `version-release` picks up from the first gate whose trace — PR, merge, tag, release notes, progress entry — is missing, never redoing a finished one. Questions from all three are phrased in plain language, with file and branch names only as a footnote. |
-| 1.5.0 | `council` now runs in three stages instead of two. After the round of cross-reviews, each participant reads the reviews left on its own write-up and answers them — what it accepts, what it rebuts, and what it learned — so everyone gets to see the reactions to its own idea, which the two-stage flow only offered to whoever happened to be launched last. Reviewers now judge the original write-up alone, and the files follow a fixed section layout so the answers land in the right place. `version-release` gains a gate that looks for everything published *from* the repository — package and container registries, static hosting, manifests fetched by URL, docs sites — and checks that each will carry the new version, fixing what it can and listing the rest as work left for you. `version-start` now phrases its questions in plain language, with code names only as a footnote, so you can answer without reading the code. |
-| 1.4.0 | `skill-sync` now reads each skill's `compatibility`, so one written for a different agent is kept out of the update and install candidates instead of being offered silently. It also scans the cache that remotely distributed skills land in — a place it never looked before, where an old copy can sit unnoticed. `skills/index.json` now carries `compatibility` for the skills that declare one, and the manifest is cross-checked against the skill's own frontmatter before anything is written, so a stale manifest cannot smuggle in a skill for the wrong agent. Adds two OpenCode-only skills for npm plugin updates — `plugin-update-check` reports what is out of date, `plugin-update-apply` clears the cache after asking — bringing the collection to nine. `version-start` now settles options-shaped questions in conversation and leaves only what genuinely needs a written answer in the plan. |
-| 1.3.0 | Adds `council`, an OpenCode-only skill that runs a round table: several different models write up the same question independently, review each other, and the main session merges the result into one decision. This is the first skill in the repository written for one agent, so agent-specific skills now declare their target in `compatibility`, CI checks that the declaration and the `description` agree, and `skills/index.json` — the manifest OpenCode installs from — carries only the skills that list OpenCode. |
-| 1.2.0 | Adds the `test-driven-development` skill: signature, tests, a run that confirms they fail, then the implementation — covering new work, updates and bug fixes. Each way of making a test pass without meaning it lists how to spot it, since naming the rule alone does not stop it. Also corrects the `version-implement` entry in the skill table, which promised TDD cycles the skill never mandated. |
-| 1.1.0 | `skill-sync` now writes only inside the config directory of the agent running it, and will not update another agent's skills on your behalf — run it from that agent instead. The three version-workflow skills handle a hosting CLI holding several accounts: they switch to the repository's owner when needed and always switch back. |
-| 1.0.0 | Install manifests for the official routes — OpenCode's `skills.urls` and the Claude Code plugin marketplace — both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
+| **3.0.0** | Two new skills for writing documents, and a `skill-sync` that fetches what they need. `japanese-writing` and `english-writing` write and revise documents in stages, reading skills published by other authors as reference material: natural-japanese and yomiyasu for Japanese, technical-documentation and humanizer for English. That material is not shipped here. A skill declares it in `external.json`, and `skill-sync` 2.0.0 fetches the declared files from the authors' repositories at install time, keeps them in `external/` inside the skill's folder, and tracks them for updates. `skill-sync` 2.0.0 also compares every file of a skill registered from another repository, where it used to compare only the `SKILL.md` body, and it audits new and changed files before placing them: it reads without running anything, sorts its findings into suspected harm, unlikely to work here, and worth knowing, and skips a target with a suspected-harm finding unless you name it. `register-external-skill` 1.1.0 runs the same audit and records a checksum list of the skill's files. `remove-skill` 1.1.0 shows what a skill's folder holds and deletes all of it, fetched references included. The text of every skill was revised with `japanese-writing` to read more plainly, without changing what any rule means; nine skills get a patch version for it. If you are upgrading, update `skill-sync` first, restart your agent, and run it again so that the references are fetched. Fourteen skills in all. |
+| 2.1.0 | `council` 1.3.0 wastes less time and keeps opinions independent. After the first stage the chair settles every point all participants agree on, merging the best details of each write-up, and stops there when nothing is left to debate; a point it doubts can still go to review. Cross-reviews are now one file per write-up and reviewer, so no reviewer reads another's review. Participants are picked to differ from the chair's model and, where possible, from each other's developer, and one that loses control or breaks the rules is replaced by a different model. All files of one council (write-ups, reviews, agreed points, the final decision and the shared material) now live in one folder per topic. The continuation table covers both OpenCode 1.x (`task` / `task_id`) and 2.x (`subagent` / `sessionID`). |
+| 2.0.0 | Three new skills. `project-start` sets up a new project end to end (whether the directory was cloned or created locally, the hosting CLI's account and the commit identity matched to the repository owner, the progress document and notes folder, the agent instruction file, license, `.gitignore`, first commit and push) and can be re-run safely because every step inspects the current state first. `register-external-skill` brings a skill from someone else's repository into the running agent, patching only the frontmatter and recording the origin under `metadata`; `remove-skill` deletes a skill after confirmation and keeps `skill-sync.json` consistent. `skill-sync` 1.5.0 checks registered external skills against their origin (by version when there is one, by a digest of the body when there is not), with an origin column in the listing and the eight states unchanged. The three version skills now sort handovers into Critical / Recommended / Optional, keep them in one handover document, raise only the Critical ones when a version starts, and keep a single short entry per version in the progress document instead of appending one per phase. Twelve skills in all. |
+| 1.9.0 | `skill-sync` now remembers, per agent, which skills you want and which you don't. The answers live in a small `skill-sync.json` directly under the config directory of the agent that ran it, never inside the agent's own settings file, so an unwanted skill stops being offered on every run. A wanted skill that is not installed is offered explicitly; one that is installed but marked unwanted is listed, left in place and not updated unless you name it. On the first run the current install state is proposed as the initial values and written once you confirm; a skill the file does not know about is asked about the same way; an unreadable file is reported and never overwritten. The eight states are unchanged; the setting is shown as a column. |
+| 1.8.0 | `python-coding` gains a section on writing tests. The style is decided in a fixed order (the project's written policy first, then the style of its existing tests, and pytest only when there is neither), so a new test never introduces a second framework into a suite. When pytest is the answer, ten rules cover discovery names, layout, bare `assert`, `pytest.raises`, `parametrize`, fixtures, `conftest.py`, isolation and skips; whether to write tests first is left to you. Seven standing guidelines are added (type hints matched to the project's Python version, exceptions, standard-library idioms, module layout and imports, using the project's own tooling, configuration and secrets, and typed data structures), and the skill now opens with a priority rule: the project's written conventions win, then its existing code, then the skill's defaults. |
+| 1.7.0 | `council` now keeps each participant's subagent session alive through all three stages: the cross-review and the answer stage are follow-up prompts to the session that wrote the original write-up, so what it read and why it decided stays in context. When a session cannot be continued, a fresh instance of the same participant is started and reads its own write-up to catch up. Material fetched during a council (abstracts, papers, manuals) now goes into a per-topic folder with a catalogue of what each file is and where it came from; participants check the catalogue before searching, so the same source is not downloaded three times. `skill-sync` now compares content as well as versions: a copy whose version matches the distribution but whose files do not is reported as *content differs*, with the file names and the size of the difference, and is left out of the update until you confirm it one by one. |
+| 1.6.0 | The three version-management skills now check where a version stands before doing anything. `version-start`, `version-implement` and `version-release` read the same seven-state model (untouched, being designed, designed, being implemented, implemented, being released, released) from the branches, tags, plan, record and progress document, print a summary, and go ahead without asking when the state is the one they expect. They ask only when something is off: a version that skips over a lower one still unreleased, a number that belongs to no version of this project, a version already started or already released. Each skill also resumes its own interrupted run: `version-start` finishes a half-written plan without recreating the branch, `version-implement` reconciles the record with the commits on the branch and continues from the right task without discarding uncommitted work, and `version-release` picks up from the first gate whose trace (PR, merge, tag, release notes, progress entry) is missing, never redoing a finished one. Questions from all three are phrased in plain language, with file and branch names only as a footnote. |
+| 1.5.0 | `council` now runs in three stages instead of two. After the round of cross-reviews, each participant reads the reviews left on its own write-up and answers them (what it accepts, what it rebuts, and what it learned), so everyone gets to see the reactions to its own idea, which the two-stage flow only offered to whoever happened to be launched last. Reviewers now judge the original write-up alone, and the files follow a fixed section layout so the answers land in the right place. `version-release` gains a gate that looks for everything published *from* the repository (package and container registries, static hosting, manifests fetched by URL, docs sites) and checks that each will carry the new version, fixing what it can and listing the rest as work left for you. `version-start` now phrases its questions in plain language, with code names only as a footnote, so you can answer without reading the code. |
+| 1.4.0 | `skill-sync` now reads each skill's `compatibility`, so one written for a different agent is kept out of the update and install candidates instead of being offered silently. It also scans the cache that remotely distributed skills land in, a place it never looked before, where an old copy can sit unnoticed. `skills/index.json` now carries `compatibility` for the skills that declare one, and the manifest is cross-checked against the skill's own frontmatter before anything is written, so a stale manifest cannot smuggle in a skill for the wrong agent. Adds two OpenCode-only skills for npm plugin updates (`plugin-update-check` reports what is out of date, `plugin-update-apply` clears the cache after asking), bringing the collection to nine. `version-start` now settles options-shaped questions in conversation and leaves only what genuinely needs a written answer in the plan. |
+| 1.3.0 | Adds `council`, an OpenCode-only skill that runs a round table: several different models write up the same question independently, review each other, and the main session merges the result into one decision. This is the first skill in the repository written for one agent, so agent-specific skills now declare their target in `compatibility`, CI checks that the declaration and the `description` agree, and `skills/index.json`, the manifest OpenCode installs from, carries only the skills that list OpenCode. |
+| 1.2.0 | Adds the `test-driven-development` skill: signature, tests, a run that confirms they fail, then the implementation, covering new work, updates and bug fixes. Each way of making a test pass without meaning it lists how to spot it, since naming the rule alone does not stop it. Also corrects the `version-implement` entry in the skill table, which promised TDD cycles the skill never mandated. |
+| 1.1.0 | `skill-sync` now writes only inside the config directory of the agent running it, and will not update another agent's skills on your behalf; run it from that agent instead. The three version-workflow skills handle a hosting CLI holding several accounts: they switch to the repository's owner when needed and always switch back. |
+| 1.0.0 | Install manifests for the official routes (OpenCode's `skills.urls` and the Claude Code plugin marketplace), both verified on real installs, alongside the existing Codex `skill-installer` route. Adds the `skill-sync` skill, which reports what is installed where and updates what you pick. |
 | 0.1.0 | First collection: four skills gathered into one repository with unified conventions, versions and CI validation. Pre-release; manual copy only. |
 
 Each release's full notes are on the
 [releases page](https://github.com/xhighhongo41/agent-skills/releases).
+
+## Acknowledgements
+
+`japanese-writing` and `english-writing` rely on four skills written and published by
+other people. This repository contains none of their content. `skill-sync` fetches
+the parts each skill uses from the author's repository at install time, together
+with the license files.
+
+| Skill | Author | Repository | License |
+|---|---|---|---|
+| natural-japanese | coji | [coji/natural-japanese](https://github.com/coji/natural-japanese) | MIT |
+| yomiyasu | nanaism | [nanaism/yomiyasu](https://github.com/nanaism/yomiyasu) | MIT (its emoji table: Unicode License V3) |
+| technical-documentation | dsebastien | [dsebastien/technical-documentation-skill](https://github.com/dsebastien/technical-documentation-skill) | Apache-2.0 |
+| humanizer | Siqi Chen (blader) | [blader/humanizer](https://github.com/blader/humanizer) | MIT |
+
+Thank you to the authors for publishing these skills.
 
 ## License
 

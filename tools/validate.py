@@ -11,8 +11,11 @@ found.  Every violation is reported before exiting so that a whole batch can be
 fixed in a single pass instead of one error per run.
 
 The conventions enforced here come from ``開発資料/v0.1実装計画.md`` section 4-5.
-Each check has a stable identifier (``V00``..``V16``) so that a report line can be
+Each check has a stable identifier (``V00``..``V17``) so that a report line can be
 traced back to the requirement it protects.
+
+``V17`` guards the ``external.json`` declaration a skill may ship: the repository
+holds only the declaration, never the fetched ``external/`` content.
 
 ``V13``/``V14`` cover the generated install manifests rather than a single skill.
 They need the whole repository (a ``VERSION`` file and both manifests) to be
@@ -24,10 +27,12 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -130,6 +135,17 @@ HARNESS_DISPLAY_SEPARATOR = " / "
 
 #: Text that closes the preamble, after the joined display names.
 HARNESS_PREAMBLE_SUFFIX = " 専用。"
+
+#: Declaration file a skill may place at its folder root to name external
+#: repositories whose material is fetched on the user's machine.
+EXTERNAL_DECLARATION_FILENAME = "external.json"
+
+#: Folder the fetched material lands in.  It exists only on a user's machine and
+#: must never be committed, so any entry with this name in a skill is an error.
+EXTERNAL_CONTENT_DIRNAME = "external"
+
+#: The only value of the declaration's ``format`` key that this tool understands.
+EXTERNAL_DECLARATION_FORMAT = 1
 
 
 # --------------------------------------------------------------------------- #
@@ -805,6 +821,201 @@ def check_compatibility_preamble(doc: SkillDoc) -> list[Violation]:
     ]
 
 
+def _reject_json_constant(constant: str) -> Any:
+    """Refuse ``NaN``, ``Infinity`` and ``-Infinity``, which are not JSON.
+
+    ``json.loads`` accepts them by default; passing this as ``parse_constant``
+    makes the parse strict.
+    """
+    raise ValueError(f"the constant {constant} is not allowed in JSON")
+
+
+def _name_problems(value: Any) -> list[str]:
+    """Return what is wrong with a declared ``name`` (empty when it is sound)."""
+    if not isinstance(value, str):
+        return [f"must be a string, found {type(value).__name__}."]
+    problems = []
+    if not NAME_PATTERN.match(value):
+        problems.append(f"{value!r} must be lowercase alphanumerics joined by single hyphens.")
+    if len(value) > MAX_NAME_CHARS:
+        problems.append(
+            f"is {len(value)} characters, exceeding the {MAX_NAME_CHARS}-character limit."
+        )
+    return problems
+
+
+def _origin_problems(value: Any) -> list[str]:
+    """Return what is wrong with a declared ``origin`` (empty when it is sound)."""
+    if not isinstance(value, str):
+        return [f"must be a string, found {type(value).__name__}."]
+    if not value.startswith("https://"):
+        return [f"{value!r} must start with 'https://'."]
+    try:
+        parts = urlsplit(value)
+    except ValueError as exc:
+        return [f"{value!r} is not a valid URL: {exc}."]
+
+    problems = []
+    if not parts.hostname:
+        problems.append(f"{value!r} must name a host.")
+    if "@" in parts.netloc:
+        problems.append("must not embed credentials ('user@' or 'user:pass@').")
+    return problems
+
+
+def _relative_path_problems(value: Any) -> list[str]:
+    """Return what is wrong with a relative path value (empty when it is sound).
+
+    Shared by ``path`` and each ``include`` element.  ``.`` (the repository
+    root) and a trailing ``/`` (the whole directory) are both sound.
+    """
+    if not isinstance(value, str):
+        return [f"must be a string, found {type(value).__name__}."]
+    if not value:
+        return ["must not be empty."]
+
+    problems = []
+    if value.startswith("/"):
+        problems.append(f"{value!r} must be relative, not start with '/'.")
+    if "\\" in value:
+        problems.append(f"{value!r} must not contain a backslash.")
+    if ".." in value.split("/"):
+        problems.append(f"{value!r} must not contain a '..' part.")
+    return problems
+
+
+def check_external_declaration(skill_dir: Path, repo_root: Path) -> list[Violation]:
+    """V17: a skill ships an ``external.json`` declaration, never fetched ``external/``.
+
+    The declaration names external repositories whose material is fetched into
+    ``external/<name>/`` on the user's machine.  The repository must hold the
+    declaration only, so an entry named ``external`` (directory, file or symlink)
+    is a violation whether or not a declaration exists.  A skill with neither
+    is not affected.
+
+    The declaration must be strict UTF-8 JSON (``NaN`` and ``Infinity`` are
+    rejected) whose top level is an object with ``format`` equal to the integer
+    ``1`` and a non-empty ``externals`` array.  Each element is an object with
+    ``name`` (a skill-style name, unique within the array), ``origin`` (an
+    ``https://`` URL with a host and no credentials) and ``path`` (a non-empty
+    relative path without ``..`` or backslashes; ``.`` is allowed), plus an
+    optional non-empty ``ref`` string and an optional non-empty ``include``
+    array of relative path strings (a trailing ``/`` is allowed).  Unknown keys
+    are allowed at both levels.
+
+    Every violation found is returned, except that a declaration that cannot be
+    read as JSON or whose top level is not an object yields that one violation
+    alone, because nothing below it can be inspected.
+
+    Args:
+        skill_dir: The skill folder.
+        repo_root: Repository root, used to build relative paths for reports.
+
+    Returns:
+        The violations found, ``external/`` first and then the declaration's.
+        Empty when the skill has neither the declaration nor ``external/``.
+    """
+    violations: list[Violation] = []
+
+    # ``Path.exists`` follows symlinks, so a dangling link would be missed; the
+    # lexical test sees every kind of entry, which is what "any entry named
+    # ``external``" asks for.
+    content_path = skill_dir / EXTERNAL_CONTENT_DIRNAME
+    if os.path.lexists(content_path):
+        violations.append(
+            Violation(
+                str(content_path.relative_to(repo_root)),
+                None,
+                "V17",
+                f"{EXTERNAL_CONTENT_DIRNAME!r} must not be committed: the repository holds "
+                f"the {EXTERNAL_DECLARATION_FILENAME} declaration only, and the content is "
+                "fetched on the user's machine.",
+            )
+        )
+
+    declaration_path = skill_dir / EXTERNAL_DECLARATION_FILENAME
+    if not os.path.lexists(declaration_path):
+        return violations
+
+    rel_path = str(declaration_path.relative_to(repo_root))
+    if not declaration_path.is_file():
+        violations.append(
+            Violation(rel_path, None, "V17", f"{EXTERNAL_DECLARATION_FILENAME} must be a file.")
+        )
+        return violations
+
+    try:
+        text = declaration_path.read_text(encoding="utf-8")
+        document = json.loads(text, parse_constant=_reject_json_constant)
+    except (OSError, ValueError, RecursionError) as exc:
+        # ``UnicodeDecodeError`` and ``json.JSONDecodeError`` are both
+        # ``ValueError`` subclasses, as is the error ``_reject_json_constant``
+        # raises for ``NaN`` and ``Infinity``.
+        violations.append(
+            Violation(
+                rel_path,
+                None,
+                "V17",
+                f"{EXTERNAL_DECLARATION_FILENAME} is not valid UTF-8 JSON: {exc}",
+            )
+        )
+        return violations
+
+    if not isinstance(document, dict):
+        violations.append(Violation(rel_path, None, "V17", "The top level must be a JSON object."))
+        return violations
+
+    def report(message: str) -> None:
+        violations.append(Violation(rel_path, None, "V17", message))
+
+    # ``True == 1`` in Python, so the type is compared exactly: ``true`` and
+    # ``1.0`` are not the integer ``1``.
+    declared_format = document.get("format")
+    if type(declared_format) is not int or declared_format != EXTERNAL_DECLARATION_FORMAT:
+        report(f"'format' must be the integer {EXTERNAL_DECLARATION_FORMAT}.")
+
+    externals = document.get("externals")
+    if not isinstance(externals, list) or not externals:
+        report("'externals' must be a non-empty array.")
+        return violations
+
+    names: list[str] = []
+    for index, entry in enumerate(externals):
+        label = f"externals[{index}]"
+        if not isinstance(entry, dict):
+            report(f"{label} must be a JSON object.")
+            continue
+        for key in ("name", "origin", "path"):
+            if key not in entry:
+                report(f"{label} is missing the required key {key!r}.")
+
+        if "name" in entry:
+            for problem in _name_problems(entry["name"]):
+                report(f"{label}.name {problem}")
+            if isinstance(entry["name"], str):
+                names.append(entry["name"])
+        if "origin" in entry:
+            for problem in _origin_problems(entry["origin"]):
+                report(f"{label}.origin {problem}")
+        if "path" in entry:
+            for problem in _relative_path_problems(entry["path"]):
+                report(f"{label}.path {problem}")
+        if "ref" in entry and (not isinstance(entry["ref"], str) or not entry["ref"]):
+            report(f"{label}.ref must be a non-empty string when present.")
+        if "include" in entry:
+            include = entry["include"]
+            if not isinstance(include, list) or not include:
+                report(f"{label}.include must be a non-empty array when present.")
+            else:
+                for position, item in enumerate(include):
+                    for problem in _relative_path_problems(item):
+                        report(f"{label}.include[{position}] {problem}")
+
+    for name in sorted({name for name in names if names.count(name) > 1}):
+        report(f"'name' {name!r} is used by more than one element of 'externals'.")
+    return violations
+
+
 def check_manifest_drift(repo_root: Path) -> list[Violation]:
     """V13/V14: the committed manifests match what the generator produces.
 
@@ -1009,6 +1220,10 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
     """
     doc, violations = load_skill(skill_dir, repo_root)
     if doc is None:
+        # V17 inspects the folder rather than ``SKILL.md``, so a broken skill
+        # still gets it: a committed ``external/`` must not hide behind V01/V02.
+        violations = list(violations)
+        violations.extend(check_external_declaration(skill_dir, repo_root))
         return violations
 
     violations = list(violations)
@@ -1024,6 +1239,7 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
     violations.extend(check_openai_yaml(doc, repo_root))
     violations.extend(check_compatibility(doc))
     violations.extend(check_compatibility_preamble(doc))
+    violations.extend(check_external_declaration(skill_dir, repo_root))
     return violations
 
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "英語の文書"
+  short_description: "英語の文書を段階を分けて書く・直す"
+  default_prompt: "$english-writing を使って、この英語の文書を書いて（または直して）ください。"
