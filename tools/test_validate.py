@@ -7,7 +7,7 @@ below builds a synthetic skill folder under ``tmp_path`` and drives it
 through :func:`validate.validate_skill`, so no test touches the network,
 the user's home directory or this repository's real ``skills/`` folder.
 
-Each test name embeds the check identifier (``V00``..``V16``) it protects,
+Each test name embeds the check identifier (``V00``..``V17``) it protects,
 per the convention documented in ``validate.py``. For every check there is
 at least one "valid" test (a fully compliant skill does not trigger the
 check) and at least one "violation" test (breaking exactly one aspect of an
@@ -17,7 +17,8 @@ otherwise compliant skill triggers the check).
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from validate import (
     MAX_NAME_CHARS,
     MAX_SHORT_DESCRIPTION_CHARS,
     Violation,
+    check_external_declaration,
     check_manifest_drift,
     check_marketplace_shape,
     validate_repository,
@@ -176,6 +178,7 @@ def write_skill(
     raw_content: str | None = None,
     write_openai_yaml: bool = True,
     openai_yaml_content: str | None = None,
+    extra_files: Mapping[str, str] | None = None,
 ) -> Path:
     """Materialise one skill folder under ``tmp_path/skills`` for a test.
 
@@ -230,6 +233,9 @@ def write_skill(
         write_openai_yaml: Whether to write ``agents/openai.yaml`` at all.
         openai_yaml_content: Raw content for ``agents/openai.yaml``,
             defaulting to a well-formed stub referencing ``name``.
+        extra_files: Additional files to write into the skill folder, mapping
+            a path relative to the folder to its text content. Missing parent
+            directories are created.
 
     Returns:
         The skill directory path, suitable for :func:`validate.validate_skill`.
@@ -280,6 +286,11 @@ def write_skill(
             else _default_openai_yaml(effective_name)
         )
         (agents_dir / "openai.yaml").write_text(yaml_text, encoding="utf-8")
+
+    for relative_path, file_content in (extra_files or {}).items():
+        extra_path = skill_dir / relative_path
+        extra_path.parent.mkdir(parents=True, exist_ok=True)
+        extra_path.write_text(file_content, encoding="utf-8")
 
     return skill_dir
 
@@ -1036,6 +1047,542 @@ def test_v16_non_string_compatibility_is_not_double_reported(tmp_path: Path) -> 
     check_ids = _check_ids(validate_skill(skill_dir, tmp_path))
     assert "V15" in check_ids
     assert "V16" not in check_ids
+
+
+# --------------------------------------------------------------------------- #
+# V17: external.json is a valid declaration and no external/ content is committed
+# --------------------------------------------------------------------------- #
+
+EXTERNAL_DIR_RELPATH = f"skills/{DEFAULT_NAME}/external"
+EXTERNAL_JSON_RELPATH = f"skills/{DEFAULT_NAME}/external.json"
+
+
+#: Sentinel meaning "leave this key out"; ``None`` is a real JSON ``null``.
+_OMIT: Any = object()
+
+
+def _entry(**overrides: Any) -> dict[str, Any]:
+    """Return a minimal valid ``externals`` element with ``overrides`` applied.
+
+    A value of :data:`_OMIT` removes the key, so a test can express "the key is
+    missing" as well as "the key has a wrong value".
+    """
+    entry: dict[str, Any] = {
+        "name": "ref-docs",
+        "origin": "https://example.com/org/repo.git",
+        "path": "docs",
+    }
+    entry.update(overrides)
+    return {key: value for key, value in entry.items() if value is not _OMIT}
+
+
+def _declaration(*entries: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+    """Return a valid declaration holding ``entries`` (one default entry if none).
+
+    ``overrides`` replace top-level keys; :data:`_OMIT` removes one.
+    """
+    document: dict[str, Any] = {
+        "format": 1,
+        "externals": list(entries) if entries else [_entry()],
+    }
+    document.update(overrides)
+    return {key: value for key, value in document.items() if value is not _OMIT}
+
+
+def _write_declared_skill(tmp_path: Path, document: Any) -> Path:
+    """Write a compliant skill whose ``external.json`` is ``document`` as JSON."""
+    return write_skill(tmp_path, extra_files={"external.json": json.dumps(document)})
+
+
+def _external_violations(tmp_path: Path, skill_dir: Path) -> list[Violation]:
+    """Run V17 alone against ``skill_dir``."""
+    return check_external_declaration(skill_dir, tmp_path)
+
+
+def _assert_declaration_violation(violations: list[Violation]) -> None:
+    """Assert there is at least one violation, all V17 against ``external.json``."""
+    assert violations
+    assert {(v.check, v.path, v.line) for v in violations} == {("V17", EXTERNAL_JSON_RELPATH, None)}
+
+
+def test_v17_constants_have_the_specified_values() -> None:
+    """The names and values other code and the spec refer to are fixed."""
+    assert validate.EXTERNAL_DECLARATION_FILENAME == "external.json"
+    assert validate.EXTERNAL_CONTENT_DIRNAME == "external"
+    assert validate.EXTERNAL_DECLARATION_FORMAT == 1
+
+
+def test_v17_no_declaration_and_no_external_dir_is_valid(tmp_path: Path) -> None:
+    """A skill with neither the declaration nor ``external/`` is not affected."""
+    skill_dir = write_skill(tmp_path)
+    assert check_external_declaration(skill_dir, tmp_path) == []
+    assert "V17" not in _check_ids(validate_skill(skill_dir, tmp_path))
+
+
+def test_v17_minimal_declaration_is_valid(tmp_path: Path) -> None:
+    """The smallest well-formed declaration passes, through the full pipeline too."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration())
+    assert check_external_declaration(skill_dir, tmp_path) == []
+    assert validate_skill(skill_dir, tmp_path) == []
+
+
+def test_v17_ref_include_and_unknown_keys_are_valid(tmp_path: Path) -> None:
+    """``ref``, ``include`` and unknown keys (top level and per element) are allowed."""
+    document = _declaration(
+        _entry(
+            ref="v1.2.3",
+            include=["docs/", "README.md", "src/a.py"],
+            note="free-form",
+        ),
+        _entry(name="second-1", ref="main"),
+        comment="top-level unknown key",
+    )
+    skill_dir = _write_declared_skill(tmp_path, document)
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "path_value",
+    [".", "docs", "docs/guide", "a/b/c.md", "docs/"],
+    ids=["dot", "single", "nested", "file", "trailing-slash"],
+)
+def test_v17_relative_path_is_valid(tmp_path: Path, path_value: str) -> None:
+    """``path`` may be ``.`` (the repository root) or any relative path."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(path=path_value)))
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+def test_v17_name_at_the_length_limit_is_valid(tmp_path: Path) -> None:
+    """A name of exactly ``MAX_NAME_CHARS`` characters passes."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(name="a" * MAX_NAME_CHARS)))
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://example.com/org/repo",
+        "https://example.com/org/repo.git",
+        "https://example.com:8443/org/repo",
+        "https://example.com",
+    ],
+    ids=["plain", "git-suffix", "port", "host-only"],
+)
+def test_v17_https_origin_is_valid(tmp_path: Path, origin: str) -> None:
+    """An ``https://`` URL with a host and no credentials passes."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(origin=origin)))
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+def test_v17_external_dir_alone_is_violation(tmp_path: Path) -> None:
+    """A fetched ``external/`` folder is reported even with no declaration."""
+    skill_dir = write_skill(tmp_path, extra_files={"external/ref-docs/a.md": "x"})
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH, None)]
+
+
+def test_v17_empty_external_dir_is_violation(tmp_path: Path) -> None:
+    """An empty ``external/`` directory is still a committed ``external/``."""
+    skill_dir = write_skill(tmp_path)
+    (skill_dir / "external").mkdir()
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+def test_v17_external_file_is_violation(tmp_path: Path) -> None:
+    """A plain file named ``external`` is rejected like the directory."""
+    skill_dir = write_skill(tmp_path, extra_files={"external": "x"})
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+def test_v17_external_symlink_is_violation(tmp_path: Path) -> None:
+    """A symlink named ``external`` is rejected."""
+    skill_dir = write_skill(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    os.symlink(tmp_path / "elsewhere", skill_dir / "external")
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+def test_v17_dangling_external_symlink_is_violation(tmp_path: Path) -> None:
+    """A symlink named ``external`` is rejected even when its target is missing."""
+    skill_dir = write_skill(tmp_path)
+    os.symlink(tmp_path / "does-not-exist", skill_dir / "external")
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+def test_v17_declaration_and_external_dir_both_are_reported(tmp_path: Path) -> None:
+    """A valid declaration does not excuse a committed ``external/``."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={
+            "external.json": json.dumps(_declaration()),
+            "external/ref-docs/a.md": "x",
+        },
+    )
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+def test_v17_external_dir_and_bad_declaration_are_both_reported(tmp_path: Path) -> None:
+    """Both problems are returned together, ``external/`` first."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={
+            "external.json": json.dumps(_declaration(format=2)),
+            "external/ref-docs/a.md": "x",
+        },
+    )
+    violations = check_external_declaration(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [
+        ("V17", EXTERNAL_DIR_RELPATH),
+        ("V17", EXTERNAL_JSON_RELPATH),
+    ]
+
+
+def test_v17_declaration_that_is_a_directory_is_violation(tmp_path: Path) -> None:
+    """``external.json`` must be a regular file."""
+    skill_dir = write_skill(tmp_path)
+    (skill_dir / "external.json").mkdir()
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "raw_text",
+    ["", "{", "not json", "{'format': 1}", '{"format": 1,}', "NaN", "Infinity", "-Infinity"],
+    ids=[
+        "empty",
+        "truncated",
+        "prose",
+        "single-quotes",
+        "trailing-comma",
+        "nan",
+        "infinity",
+        "negative-infinity",
+    ],
+)
+def test_v17_not_json_is_single_violation(tmp_path: Path, raw_text: str) -> None:
+    """Text that is not strict JSON yields exactly one violation."""
+    skill_dir = write_skill(tmp_path, extra_files={"external.json": raw_text})
+    violations = check_external_declaration(skill_dir, tmp_path)
+    _assert_declaration_violation(violations)
+    assert len(violations) == 1
+
+
+def test_v17_json_constant_inside_an_object_is_violation(tmp_path: Path) -> None:
+    """``NaN`` nested in an otherwise valid object is rejected too."""
+    raw_text = '{"format": 1, "externals": [{"name": "a", "origin": "https://h/x", "path": ".",'
+    raw_text += ' "score": NaN}]}'
+    skill_dir = write_skill(tmp_path, extra_files={"external.json": raw_text})
+    violations = check_external_declaration(skill_dir, tmp_path)
+    _assert_declaration_violation(violations)
+    assert len(violations) == 1
+
+
+def test_v17_non_utf8_declaration_is_single_violation(tmp_path: Path) -> None:
+    """Bytes that are not UTF-8 are reported rather than raising."""
+    skill_dir = write_skill(tmp_path)
+    (skill_dir / "external.json").write_bytes(b'{"format": 1, "x": "\xff\xfe"}')
+    violations = check_external_declaration(skill_dir, tmp_path)
+    _assert_declaration_violation(violations)
+    assert len(violations) == 1
+
+
+@pytest.mark.parametrize(
+    "document",
+    [[], [_entry()], "text", 1, None, True],
+    ids=["empty-array", "array-of-entries", "string", "number", "null", "boolean"],
+)
+def test_v17_top_level_not_an_object_is_single_violation(tmp_path: Path, document: Any) -> None:
+    """A top level that is not an object yields exactly one violation."""
+    skill_dir = _write_declared_skill(tmp_path, document)
+    violations = check_external_declaration(skill_dir, tmp_path)
+    _assert_declaration_violation(violations)
+    assert len(violations) == 1
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    ["2", "0", '"1"', "true", "1.0", "null", "[1]", "-1"],
+    ids=["two", "zero", "string-one", "true", "float-one", "null", "array", "negative"],
+)
+def test_v17_format_not_integer_one_is_violation(tmp_path: Path, raw_value: str) -> None:
+    """``format`` must be the integer ``1``; ``true``, ``1.0`` and ``"1"`` are not."""
+    raw_text = (
+        '{"format": ' + raw_value + ', "externals": '
+        '[{"name": "a", "origin": "https://h/x", "path": "."}]}'
+    )
+    skill_dir = write_skill(tmp_path, extra_files={"external.json": raw_text})
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+def test_v17_format_missing_is_violation(tmp_path: Path) -> None:
+    """A declaration without ``format`` is rejected."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(format=_OMIT))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "externals",
+    [_OMIT, [], None, {}, {"name": "a"}, "text", 1],
+    ids=["missing", "empty", "null", "empty-object", "object", "string", "number"],
+)
+def test_v17_externals_not_a_nonempty_array_is_violation(tmp_path: Path, externals: Any) -> None:
+    """``externals`` must be an array of at least one element."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(externals=externals))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "element",
+    ["text", 1, None, ["name"], True],
+    ids=["string", "number", "null", "array", "boolean"],
+)
+def test_v17_element_not_an_object_is_violation(tmp_path: Path, element: Any) -> None:
+    """Every element of ``externals`` must be an object."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(externals=[element]))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize("missing_key", ["name", "origin", "path"])
+def test_v17_required_key_missing_is_violation(tmp_path: Path, missing_key: str) -> None:
+    """``name``, ``origin`` and ``path`` are each required."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(**{missing_key: _OMIT})))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    ["Ref-Docs", "ref_docs", "ref docs", "-ref", "ref-", "ref--docs", "", "a" * 65, 1, None, ["a"]],
+    ids=[
+        "uppercase",
+        "underscore",
+        "space",
+        "leading-hyphen",
+        "trailing-hyphen",
+        "double-hyphen",
+        "empty",
+        "too-long",
+        "number",
+        "null",
+        "array",
+    ],
+)
+def test_v17_bad_name_is_violation(tmp_path: Path, bad_name: Any) -> None:
+    """``name`` is a string matching the skill-name pattern within the length limit."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(name=bad_name)))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+def test_v17_duplicate_name_is_violation(tmp_path: Path) -> None:
+    """Two elements may not share a ``name``."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(path="a"), _entry(path="b")))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "bad_origin",
+    [
+        "http://example.com/org/repo",
+        "ssh://git@example.com/org/repo",
+        "git@example.com:org/repo.git",
+        "git://example.com/org/repo",
+        "file:///srv/repo",
+        "../repo",
+        "/srv/repo",
+        "example.com/org/repo",
+        "https://user:pw@example.com/x",
+        "https://token@example.com/x",
+        "https://:pw@example.com/x",
+        "https://",
+        "https:///org/repo",
+        "https://[::1/x",
+        "",
+        1,
+        None,
+        ["https://example.com/x"],
+    ],
+    ids=[
+        "http",
+        "ssh",
+        "scp-style",
+        "git-scheme",
+        "file",
+        "relative-path",
+        "absolute-path",
+        "no-scheme",
+        "user-and-password",
+        "token-only",
+        "password-only",
+        "no-host",
+        "empty-host",
+        "broken-netloc",
+        "empty",
+        "number",
+        "null",
+        "array",
+    ],
+)
+def test_v17_bad_origin_is_violation(tmp_path: Path, bad_origin: Any) -> None:
+    """``origin`` is an ``https://`` URL with a host and no credentials."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(origin=bad_origin)))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    ["/docs", "/", "../docs", "docs/../x", "docs/..", "..", "docs\\guide", "\\docs", "", 1, None],
+    ids=[
+        "absolute",
+        "root",
+        "leading-parent",
+        "middle-parent",
+        "trailing-parent",
+        "only-parent",
+        "backslash",
+        "leading-backslash",
+        "empty",
+        "number",
+        "null",
+    ],
+)
+def test_v17_bad_path_is_violation(tmp_path: Path, bad_path: Any) -> None:
+    """``path`` is a non-empty relative path with no ``..`` part and no backslash."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(path=bad_path)))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["main", "v1.2.3", "0123abcd", "feature/x"],
+    ids=["branch", "tag", "commit", "slash"],
+)
+def test_v17_ref_string_is_valid(tmp_path: Path, ref: str) -> None:
+    """Any non-empty string is accepted as ``ref``."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(ref=ref)))
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "bad_ref",
+    ["", 1, None, True, ["main"], {"name": "main"}],
+    ids=["empty", "number", "null", "boolean", "array", "object"],
+)
+def test_v17_bad_ref_is_violation(tmp_path: Path, bad_ref: Any) -> None:
+    """``ref``, when present, is a non-empty string."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(ref=bad_ref)))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+def test_v17_include_with_directory_and_file_entries_is_valid(tmp_path: Path) -> None:
+    """``include`` entries may end in ``/`` to take a whole directory."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(include=["docs/", "a.md"])))
+    assert check_external_declaration(skill_dir, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "bad_include",
+    [
+        "docs/",
+        {},
+        None,
+        1,
+        [],
+        ["../x"],
+        ["docs/../x"],
+        ["docs/.."],
+        ["/etc/passwd"],
+        ["docs\\x"],
+        [""],
+        [1],
+        [None],
+        ["docs/", ["x"]],
+        ["ok.md", "../x"],
+    ],
+    ids=[
+        "string",
+        "object",
+        "null",
+        "number",
+        "empty-array",
+        "parent",
+        "middle-parent",
+        "trailing-parent",
+        "absolute",
+        "backslash",
+        "empty-string",
+        "number-element",
+        "null-element",
+        "array-element",
+        "one-bad-among-good",
+    ],
+)
+def test_v17_bad_include_is_violation(tmp_path: Path, bad_include: Any) -> None:
+    """``include``, when present, is a non-empty array of safe relative paths."""
+    skill_dir = _write_declared_skill(tmp_path, _declaration(_entry(include=bad_include)))
+    _assert_declaration_violation(check_external_declaration(skill_dir, tmp_path))
+
+
+def test_v17_independent_faults_are_all_reported(tmp_path: Path) -> None:
+    """Faults in different elements and levels are returned together, not first-only."""
+    document = _declaration(
+        _entry(name="Bad_Name"),
+        _entry(name="second", origin="http://example.com/x"),
+        _entry(name="third", path="../x"),
+        format=2,
+    )
+    skill_dir = _write_declared_skill(tmp_path, document)
+    violations = check_external_declaration(skill_dir, tmp_path)
+    _assert_declaration_violation(violations)
+    assert len(violations) >= 4
+    assert len({v.message for v in violations}) == len(violations)
+
+
+def test_v17_runs_inside_validate_skill_after_other_checks(tmp_path: Path) -> None:
+    """V17 reaches ``validate_skill`` and is listed after every other check."""
+    skill_dir = write_skill(
+        tmp_path,
+        license_value="Apache-2.0",
+        compatibility="opencode",
+        extra_files={"external/ref-docs/a.md": "x", "external.json": json.dumps(_declaration())},
+    )
+    checks = [v.check for v in validate_skill(skill_dir, tmp_path)]
+    assert "V06" in checks
+    assert "V16" in checks
+    assert checks[-1] == "V17"
+    assert checks.count("V17") == 1
+
+
+def test_v17_runs_when_skill_md_is_missing(tmp_path: Path) -> None:
+    """A missing ``SKILL.md`` does not hide a committed ``external/`` (V01 then V17)."""
+    skill_dir = tmp_path / "skills" / DEFAULT_NAME
+    (skill_dir / "external" / "ref-docs").mkdir(parents=True)
+    (skill_dir / "external" / "ref-docs" / "a.md").write_text("x", encoding="utf-8")
+    violations = validate_skill(skill_dir, tmp_path)
+    assert [(v.check, v.path) for v in violations] == [
+        ("V01", f"skills/{DEFAULT_NAME}/SKILL.md"),
+        ("V17", EXTERNAL_DIR_RELPATH),
+    ]
+
+
+def test_v17_runs_when_frontmatter_is_broken(tmp_path: Path) -> None:
+    """A SKILL.md that fails V02 does not hide a bad declaration either."""
+    skill_dir = write_skill(
+        tmp_path,
+        raw_content="no frontmatter here\n",
+        extra_files={"external.json": json.dumps(_declaration(format=2))},
+    )
+    checks = [v.check for v in validate_skill(skill_dir, tmp_path)]
+    assert checks == ["V02", "V17"]
+
+
+def test_v17_surfaces_through_validate_repository(tmp_path: Path) -> None:
+    """The repository-level entry point reports V17 for a skill that has ``external/``."""
+    write_skill(tmp_path, extra_files={"external/ref-docs/a.md": "x"})
+    violations = validate_repository(tmp_path, min_skills=1)
+    assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
 
 
 # --------------------------------------------------------------------------- #

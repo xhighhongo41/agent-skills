@@ -46,7 +46,7 @@ run() {
 run "${ruff_cmd[@]}" check .
 run "${ruff_cmd[@]}" format --check .
 run "${python_cmd[@]}" -m pytest tools/ -q
-# Covers the skills (V00..V12, V15, V16) and the generated install manifests (V13/V14).
+# Covers the skills (V00..V12, V15..V17) and the generated install manifests (V13/V14).
 run "${python_cmd[@]}" tools/validate.py --min-skills "$expected_skills"
 # Catches an edited skill that kept its old version. Skips itself, rather than
 # failing, in a checkout without tags.
