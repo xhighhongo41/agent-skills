@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "externals": [
+    {
+      "name": "technical-documentation",
+      "origin": "https://github.com/dsebastien/technical-documentation-skill",
+      "path": "skills/technical-documentation",
+      "include": [
+        "SKILL.md",
+        "references/"
+      ]
+    },
+    {
+      "name": "humanizer",
+      "origin": "https://github.com/blader/humanizer",
+      "path": ".",
+      "include": [
+        "SKILL.md"
+      ]
+    }
+  ]
+}
