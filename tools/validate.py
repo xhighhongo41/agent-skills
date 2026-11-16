@@ -1255,6 +1255,12 @@ SHARED_TEXT_GROUPS: tuple[SharedTextGroup, ...] = (
         "register-external-skill/SKILL.md",
         "remove-skill/SKILL.md",
     ),
+    SharedTextGroup.sections(
+        "plugin-cache-section",
+        "### キャッシュの場所",
+        "plugin-update-check/SKILL.md",
+        "plugin-update-apply/SKILL.md",
+    ),
 )
 
 
