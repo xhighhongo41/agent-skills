@@ -18,7 +18,7 @@ tested with:
 | Agent | Skill directory |
 |---|---|
 | [Claude Code](https://code.claude.com) | `~/.claude/skills/` (Windows: `%USERPROFILE%\.claude\skills\`) |
-| [OpenAI Codex](https://learn.chatgpt.com/docs/build-skills) | `~/.codex/skills/` (or `$CODEX_HOME/skills/`) |
+| [OpenAI Codex](https://learn.chatgpt.com/docs/build-skills) | `~/.codex/skills/` (or `$CODEX_HOME/skills/`). Codex also reads `~/.agents/skills/`, a directory OpenCode reads too |
 | [OpenCode](https://opencode.ai) | `~/.config/opencode/skills/` (same path on Windows) |
 
 Any other tool that reads the Agent Skills format should work too.
@@ -83,7 +83,7 @@ the other three are each agent's own mechanism.
 | **A** Ask your agent | any | re-run the request | `/python-coding` |
 | **B** Copy it yourself | any | re-run, or use `skill-sync` | `/python-coding` |
 | **C** Codex `skill-installer` | OpenAI Codex | reinstall; it has no version check | `/python-coding` |
-| **D** OpenCode `skills.urls` | OpenCode | automatic, when a version changes | `/python-coding` |
+| **D** OpenCode `skills` setting | OpenCode | automatic, when a version changes | `/python-coding` |
 | **E** Claude Code marketplace | Claude Code | `/plugin marketplace update` | `/agent-skills:python-coding` |
 
 Routes **D** and **E** install every skill at once. **A**, **B** and **C** take one skill at a time.
@@ -144,26 +144,20 @@ Use skill-installer to install
 https://github.com/xhighhongo41/agent-skills/tree/main/skills/python-coding
 ```
 
-### Option D — OpenCode `skills.urls`
+### Option D — OpenCode `skills` setting
 
 OpenCode can fetch skills from this repository itself and keep them current.
-Point it at the manifest directory in your `opencode.json`:
-
-```json
-{
-  "skills": {
-    "urls": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
-  }
-}
-```
-
-OpenCode v2 (the separate `opencode2` binary) takes a flat array instead:
+Add the manifest directory to the `skills` array in your `opencode.json`:
 
 ```json
 {
   "skills": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
 }
 ```
+
+This form works in OpenCode 1.x and 2.x. Older configurations put the URL in
+`{"skills": {"urls": [...]}}`; OpenCode still accepts that object and converts
+it to the array form, so an existing setup keeps working.
 
 OpenCode reads `index.json` from that directory, downloads every skill listed in
 it, and refetches a skill whenever its version string changes.
@@ -277,6 +271,12 @@ proposed as the initial values and written once you confirm.
 will not update another agent's skills on your behalf; to update a different
 agent, run `skill-sync` from that agent.
 
+By default `skill-sync` compares your skills against this repository's
+`index.json`; on OpenCode it uses the URL from the `skills` setting instead. If
+you install from a fork, add a `"source"` entry to `skill-sync.json` with the URL
+of the fork's `index.json` or of the directory that holds it. `skill-sync` then
+uses that URL ahead of both.
+
 **External references.** A skill can declare, in an `external.json` file in its
 folder, material that it reads from other authors' repositories. `japanese-writing`
 and `english-writing` each declare two skills; [Acknowledgements](#acknowledgements)
@@ -290,7 +290,7 @@ file disappears upstream, your copy of it stays; `skill-sync` reports it and ask
 whether to delete it.
 
 References can be placed only in a copy that lives in the agent's own skills
-directory. A copy installed through OpenCode's `skills.urls` (route **D**) or the
+directory. A copy installed through OpenCode's `skills` setting (route **D**) or the
 Claude Code marketplace (route **E**) sits in an area that `skill-sync` does not
 write to. For such a copy, `skill-sync` offers to install a second copy into your
 own skills directory, and that copy receives the references.
@@ -351,7 +351,8 @@ fails the build.
 
 | Version | What changed |
 |---|---|
-| **3.0.0** | Two new skills for writing documents, and a `skill-sync` that fetches what they need. `japanese-writing` and `english-writing` write and revise documents in stages, reading skills published by other authors as reference material: natural-japanese and yomiyasu for Japanese, technical-documentation and humanizer for English. That material is not shipped here. A skill declares it in `external.json`, and `skill-sync` 2.0.0 fetches the declared files from the authors' repositories at install time, keeps them in `external/` inside the skill's folder, and tracks them for updates. `skill-sync` 2.0.0 also compares every file of a skill registered from another repository, where it used to compare only the `SKILL.md` body, and it audits new and changed files before placing them: it reads without running anything, sorts its findings into suspected harm, unlikely to work here, and worth knowing, and skips a target with a suspected-harm finding unless you name it. `register-external-skill` 1.1.0 runs the same audit and records a checksum list of the skill's files. `remove-skill` 1.1.0 shows what a skill's folder holds and deletes all of it, fetched references included. The text of every skill was revised with `japanese-writing` to read more plainly, without changing what any rule means; nine skills get a patch version for it. If you are upgrading, update `skill-sync` first, restart your agent, and run it again so that the references are fetched. Fourteen skills in all. |
+| **3.1.0** | All fourteen skills are revised, and none is added. `skill-sync` 2.1.0 also scans `~/.agents/skills/`, which the current Codex documentation names as the user skills directory and which OpenCode reads too; it keeps writing to `~/.codex/skills/`, which Codex still reads. It reads OpenCode's `skills` array as well as the older `skills.urls` object, takes the distribution source from a `"source"` entry in `skill-sync.json` when you install from a fork, and holds back a reference whose upstream changed shape and tells you why. `japanese-writing` and `english-writing` 1.1.0 stop and ask when a reference no longer matches what they expect. `python-coding` 1.2.0 puts its safety rules above project conventions and adds a docstring style section (Google style unless the project says otherwise). `test-driven-development` 1.1.0 changes a test only when two independent judges both find the test at fault, and requires a test added after the implementation to fail against a deliberately broken implementation first. The three version-management skills, `council`, `project-start` and both `plugin-update` skills close gaps found when their text was revised for 3.0.0, mostly in resuming after an interruption, switching accounts, and what to report. |
+| 3.0.0 | Two new skills for writing documents, and a `skill-sync` that fetches what they need. `japanese-writing` and `english-writing` write and revise documents in stages, reading skills published by other authors as reference material: natural-japanese and yomiyasu for Japanese, technical-documentation and humanizer for English. That material is not shipped here. A skill declares it in `external.json`, and `skill-sync` 2.0.0 fetches the declared files from the authors' repositories at install time, keeps them in `external/` inside the skill's folder, and tracks them for updates. `skill-sync` 2.0.0 also compares every file of a skill registered from another repository, where it used to compare only the `SKILL.md` body, and it audits new and changed files before placing them: it reads without running anything, sorts its findings into suspected harm, unlikely to work here, and worth knowing, and skips a target with a suspected-harm finding unless you name it. `register-external-skill` 1.1.0 runs the same audit and records a checksum list of the skill's files. `remove-skill` 1.1.0 shows what a skill's folder holds and deletes all of it, fetched references included. The text of every skill was revised with `japanese-writing` to read more plainly, without changing what any rule means; nine skills get a patch version for it. If you are upgrading, update `skill-sync` first, restart your agent, and run it again so that the references are fetched. Fourteen skills in all. |
 | 2.1.0 | `council` 1.3.0 wastes less time and keeps opinions independent. After the first stage the chair settles every point all participants agree on, merging the best details of each write-up, and stops there when nothing is left to debate; a point it doubts can still go to review. Cross-reviews are now one file per write-up and reviewer, so no reviewer reads another's review. Participants are picked to differ from the chair's model and, where possible, from each other's developer, and one that loses control or breaks the rules is replaced by a different model. All files of one council (write-ups, reviews, agreed points, the final decision and the shared material) now live in one folder per topic. The continuation table covers both OpenCode 1.x (`task` / `task_id`) and 2.x (`subagent` / `sessionID`). |
 | 2.0.0 | Three new skills. `project-start` sets up a new project end to end (whether the directory was cloned or created locally, the hosting CLI's account and the commit identity matched to the repository owner, the progress document and notes folder, the agent instruction file, license, `.gitignore`, first commit and push) and can be re-run safely because every step inspects the current state first. `register-external-skill` brings a skill from someone else's repository into the running agent, patching only the frontmatter and recording the origin under `metadata`; `remove-skill` deletes a skill after confirmation and keeps `skill-sync.json` consistent. `skill-sync` 1.5.0 checks registered external skills against their origin (by version when there is one, by a digest of the body when there is not), with an origin column in the listing and the eight states unchanged. The three version skills now sort handovers into Critical / Recommended / Optional, keep them in one handover document, raise only the Critical ones when a version starts, and keep a single short entry per version in the progress document instead of appending one per phase. Twelve skills in all. |
 | 1.9.0 | `skill-sync` now remembers, per agent, which skills you want and which you don't. The answers live in a small `skill-sync.json` directly under the config directory of the agent that ran it, never inside the agent's own settings file, so an unwanted skill stops being offered on every run. A wanted skill that is not installed is offered explicitly; one that is installed but marked unwanted is listed, left in place and not updated unless you name it. On the first run the current install state is proposed as the initial values and written once you confirm; a skill the file does not know about is asked about the same way; an unreadable file is reported and never overwritten. The eight states are unchanged; the setting is shown as a column. |
