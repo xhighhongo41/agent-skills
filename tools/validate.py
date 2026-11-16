@@ -1249,6 +1249,12 @@ SHARED_TEXT_GROUPS: tuple[SharedTextGroup, ...] = (
         "skill-sync/references/contents.md",
         "register-external-skill/references/contents.md",
     ),
+    SharedTextGroup.sections(
+        "agent-table-section",
+        "## 既知のエージェントのスキルディレクトリ",
+        "register-external-skill/SKILL.md",
+        "remove-skill/SKILL.md",
+    ),
 )
 
 

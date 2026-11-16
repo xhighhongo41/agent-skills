@@ -3,14 +3,14 @@ name: register-external-skill
 description: "他者のリポジトリで公開されているスキルを自エージェントに取り込んで手元管理するスキル。引数のリポジトリを取得して導入可能なスキルを列挙し、自エージェントの対象外を明示したうえで選ばれたものだけを自エージェントのスキル置き場に配置する。配置の前に内容を監査して懸念を報告する。frontmatterが無い・不整合なときはfrontmatterだけを補い本文は変えない。導入元と取得時点の要約値をmetadataに、付属ファイルの一覧と要約値をスキルのフォルダ内に記録し、以後の更新確認はskill-syncが行う。"
 license: MIT
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # register-external-skill: 他者のリポジトリのスキルを取り込む
 
-> **skill version**: 1.1.0
+> **skill version**: 1.2.0
 
-セッション内で初めて本スキルを使用するときは「register-external-skill スキル v1.1.0 を使用します」と宣言する。
+セッション内で初めて本スキルを使用するときは「register-external-skill スキル v1.2.0 を使用します」と宣言する。
 
 他者が公開しているスキルを、自エージェントに「お気に入り」として取り込み、以後は `skill-sync` で更新を確認できるようにするための手順書である。
 本スキルが行うのは取得・列挙・対象判定・選択・frontmatter の補い・監査・配置・由来の記録までで、更新の確認と適用は `skill-sync`、削除は `remove-skill` が担う。
@@ -55,7 +55,7 @@ metadata:
 
 - **要約値の計算**: 本文は閉じ `---` の次の行以降（frontmatter が無ければ全文）。改行を LF に揃え、末尾の改行を1つにした UTF-8 のバイト列の SHA-256（`shasum -a 256` または `hashlib`。16進は小文字）。
   frontmatter を含めないのは、手元の frontmatter が本スキルで補われることがあるためである。`skill-sync` も同じ規則で計算する（直すときは両方を同時に直す）。
-- 自エージェントの判別とスキルの置き場は、末尾の「既知のエージェントのスキルディレクトリ」の表で引く。表は `skill-sync` と同じであり、直すときは両方を同時に直す。
+- 自エージェントの判別とスキルの置き場は、末尾の「既知のエージェントのスキルディレクトリ」の表で引く。表は `skill-sync` と同じ行を持ち、直すときは3つを同時に直す。
 
 ## 手順
 
@@ -143,14 +143,16 @@ GitHub でもそれ以外のホスティングサービスでも、ローカル�
 
 ## 既知のエージェントのスキルディレクトリ
 
-この表はデータである。`skill-sync` の同名の表と同じ内容であり、直すときは両方を同時に直す。
+この表はデータである。`skill-sync` の同名の表と同じ行を持つ（`skill-sync` は配布キャッシュの列を足している）。直すときは、`skill-sync`・`register-external-skill`・`remove-skill` の3つを同時に直す。
 表のパスが存在しなければ、汎用則（`<そのエージェントのコンフィグディレクトリ>/skills/<スキル名>/SKILL.md`。単数形 `skill` もある）で探す。
 
 | エージェント | ユーザースコープ | `compatibility` の値 | 環境変数による上書き |
 |---|---|---|---|
 | Claude Code | `~/.claude/skills/` | `claude-code` | `CLAUDE_CONFIG_DIR` |
-| OpenAI Codex | `~/.codex/skills/` | `codex` | `CODEX_HOME` |
+| OpenAI Codex | `~/.codex/skills/`（書き込み先）。`~/.agents/skills/` も読む（下記） | `codex` | `CODEX_HOME` |
 | OpenCode | `~/.config/opencode/skills/` | `opencode` | `XDG_CONFIG_HOME` / `OPENCODE_CONFIG_DIR` |
+
+`~/.agents/skills/` は Codex と OpenCode が読む共通の置き場であり、どのエージェントの書き込み先でもない。そこにあるスキルは自分から見えているが、利用者が明示的に指示した場合を除き、書き込まず、削除もしない。Codex の現行の公式文書はユーザースコープとして `~/.agents/skills/` だけを挙げる。`~/.codex/skills/` は実機で読まれているので書き込み先はこちらに据え置き、Codex がこれを読まなくなったら移す。
 
 Windows では `~` をユーザープロファイル（`%USERPROFILE%`）に読み替える。
 
