@@ -152,7 +152,7 @@ GitHub でもそれ以外のホスティングサービスでも、ローカル�
 | OpenAI Codex | `~/.codex/skills/`（書き込み先）。`~/.agents/skills/` も読む（下記） | `codex` | `CODEX_HOME` |
 | OpenCode | `~/.config/opencode/skills/` | `opencode` | `XDG_CONFIG_HOME` / `OPENCODE_CONFIG_DIR` |
 
-`~/.agents/skills/` は Codex と OpenCode が読む共通の置き場であり、どのエージェントの書き込み先でもない。そこにあるスキルは自分から見えているが、利用者が明示的に指示した場合を除き、書き込まず、削除もしない。Codex の現行の公式文書はユーザースコープとして `~/.agents/skills/` だけを挙げる。`~/.codex/skills/` は実機で読まれているので書き込み先はこちらに据え置き、Codex がこれを読まなくなったら移す。
+`~/.agents/skills/` は Codex と OpenCode が読む共通の置き場であり、どのエージェントの書き込み先でもない。そこにあるスキルは自分から見えているが、利用者が明示的に指示した場合を除き、書き込まず、削除もしない。Codex の現行の公式文書はユーザースコープとして `~/.agents/skills/` だけを挙げる。`~/.codex/skills/` は実機で読まれているので書き込み先はこちらに据え置き、Codex がこれを読まなくなったら移す。Codex 同梱の `skill-installer` の既定の導入先は未確認である。
 
 Windows では `~` をユーザープロファイル（`%USERPROFILE%`）に読み替える。
 
