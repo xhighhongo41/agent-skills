@@ -11,11 +11,20 @@ found.  Every violation is reported before exiting so that a whole batch can be
 fixed in a single pass instead of one error per run.
 
 The conventions enforced here come from ``開発資料/v0.1実装計画.md`` section 4-5.
-Each check has a stable identifier (``V00``..``V17``) so that a report line can be
+Each check has a stable identifier (``V00``..``V19``) so that a report line can be
 traced back to the requirement it protects.
 
 ``V17`` guards the ``external.json`` declaration a skill may ship: the repository
 holds only the declaration, never the fetched ``external/`` content.
+
+``V18`` keeps the passages several skills share word for word (see
+:data:`SHARED_TEXT_GROUPS`) identical across their copies.  Like ``V13``/``V14``
+it reads named files of the real repository, so it is opt-in for library callers
+and always on from the CLI.
+
+``V19`` applies the ``V11`` denylist to the rest of a skill's text files
+(references, scripts, ``agents/openai.yaml``), with the same ``compatibility``
+exemption.
 
 ``V13``/``V14`` cover the generated install manifests rather than a single skill.
 They need the whole repository (a ``VERSION`` file and both manifests) to be
@@ -147,6 +156,22 @@ EXTERNAL_CONTENT_DIRNAME = "external"
 #: The only value of the declaration's ``format`` key that this tool understands.
 EXTERNAL_DECLARATION_FORMAT = 1
 
+#: Extensions (compared in lower case) of the auxiliary files V19 scans.  Other
+#: files, images and archives for instance, are not text the agent reads.
+AUXILIARY_TEXT_SUFFIXES = frozenset({".md", ".json", ".yaml", ".yml", ".txt", ".py", ".sh"})
+
+#: Folders V19 never descends into, wherever they sit in a skill.  They hold
+#: local tool caches, which are not committed but may record absolute paths.
+AUXILIARY_SKIPPED_DIRNAMES = frozenset(
+    {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+)
+
+#: A Markdown ATX heading line: one to six ``#`` then a space, a tab or the end.
+HEADING_PATTERN = re.compile(r"^(#{1,6})(?:[ \t]|$)")
+
+#: The opening line of a fenced code block, up to three spaces of indentation.
+CODE_FENCE_PATTERN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
 
 # --------------------------------------------------------------------------- #
 # Data structures
@@ -227,6 +252,92 @@ class SkillDoc:
         """
         compatibility = self.frontmatter.get("compatibility")
         return compatibility if isinstance(compatibility, str) else None
+
+
+@dataclasses.dataclass(frozen=True)
+class SharedTextTarget:
+    """One copy of a passage that V18 compares with the other copies.
+
+    Attributes:
+        path: Path of the file, relative to ``skills/`` and written with ``/``.
+        heading: The full heading line (``"## ..."``) that opens the section, or
+            ``None`` to compare the whole file.
+
+    Raises:
+        ValueError: When ``path`` is empty, absolute or contains ``..`` or a
+            backslash, or when ``heading`` is not a Markdown heading line.
+    """
+
+    path: str
+    heading: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a target that could never be located."""
+        problems = _relative_path_problems(self.path)
+        if problems:
+            raise ValueError(f"SharedTextTarget path {problems[0]}")
+        if self.heading is not None and not HEADING_PATTERN.match(self.heading):
+            raise ValueError(
+                f"SharedTextTarget heading {self.heading!r} must be a Markdown heading "
+                "line such as '## Title'."
+            )
+
+    @property
+    def label(self) -> str:
+        """Return the repository-relative path of the file, as used in reports."""
+        return f"{SKILLS_DIRNAME}/{self.path}"
+
+
+@dataclasses.dataclass(frozen=True)
+class SharedTextGroup:
+    """Passages that claim to be the same text and must stay identical (V18).
+
+    Attributes:
+        name: Identifier quoted in reports, unique within the table.
+        targets: The copies, two or more.  The first one is the reference the
+            others are compared with.
+
+    Raises:
+        ValueError: When the group has fewer than two targets.
+    """
+
+    name: str
+    targets: tuple[SharedTextTarget, ...]
+
+    def __post_init__(self) -> None:
+        """Refuse a group with nothing to compare."""
+        if len(self.targets) < 2:
+            raise ValueError(
+                f"SharedTextGroup {self.name!r} needs at least two targets, "
+                f"found {len(self.targets)}."
+            )
+
+    @classmethod
+    def files(cls, name: str, *paths: str) -> SharedTextGroup:
+        """Build a group that compares whole files.
+
+        Args:
+            name: Identifier quoted in reports.
+            *paths: The files, relative to ``skills/``.
+
+        Returns:
+            The group.
+        """
+        return cls(name, tuple(SharedTextTarget(path) for path in paths))
+
+    @classmethod
+    def sections(cls, name: str, heading: str, *paths: str) -> SharedTextGroup:
+        """Build a group that compares the section under one heading in several files.
+
+        Args:
+            name: Identifier quoted in reports.
+            heading: The full heading line, for example ``"## Title"``.
+            *paths: The files, relative to ``skills/``.
+
+        Returns:
+            The group.
+        """
+        return cls(name, tuple(SharedTextTarget(path, heading) for path in paths))
 
 
 # --------------------------------------------------------------------------- #
@@ -412,6 +523,44 @@ def _declared_harnesses(doc: SkillDoc) -> list[str] | None:
     if len(set(harnesses)) != len(harnesses):
         return None
     return harnesses
+
+
+def _scanned_denylist_terms(doc: SkillDoc) -> tuple[str, ...]:
+    """Return the denylisted terms to look for in ``doc``'s skill (V11 and V19).
+
+    The phrase owned by each harness the skill declares in ``compatibility`` is
+    dropped; every other term of :data:`DENYLIST` is kept.
+    """
+    declared = _declared_harnesses(doc) or []
+    exempt = {HARNESS_DENYLIST_TERMS[harness] for harness in declared}
+    return tuple(term for term in DENYLIST if term not in exempt)
+
+
+def _first_line_containing(term: str, lines: Sequence[str]) -> int | None:
+    """Return the 0-indexed position of the first line containing ``term``, if any."""
+    for offset, line in enumerate(lines):
+        if term in line:
+            return offset
+    return None
+
+
+def _denylist_violation(rel_path: str, line: int, check: str, term: str) -> Violation:
+    """Build the report V11 and V19 share for one denylisted term."""
+    return Violation(rel_path, line, check, f"Denylisted term {term!r} found.")
+
+
+def _text_lines(text: str) -> list[str]:
+    """Split ``text`` into lines after turning CRLF and lone CR into LF.
+
+    ``str.splitlines`` is not used because it also breaks on form feeds and
+    Unicode line separators, which would shift line numbers away from what an
+    editor shows.  A final newline does not produce an extra empty line.
+    """
+    normalised = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalised.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def check_frontmatter_keys(doc: SkillDoc) -> list[Violation]:
@@ -642,26 +791,80 @@ def check_denylist(doc: SkillDoc) -> list[Violation]:
     the phrase of an undeclared harness — is still scanned, and a declaration
     V15 rejects exempts nothing at all.
     """
-    declared = _declared_harnesses(doc) or []
-    exempt = {HARNESS_DENYLIST_TERMS[harness] for harness in declared}
-    scanned = tuple(term for term in DENYLIST if term not in exempt)
-
     violations = []
-    for term in scanned:
+    for term in _scanned_denylist_terms(doc):
         line = None
-        for offset, source_line in enumerate(doc.frontmatter_lines):
-            if term in source_line:
-                line = doc.frontmatter_start_line + 1 + offset
-                break
-        if line is None:
-            for offset, source_line in enumerate(doc.body_lines):
-                if term in source_line:
-                    line = doc.body_start_line + offset
-                    break
+        offset = _first_line_containing(term, doc.frontmatter_lines)
+        if offset is not None:
+            line = doc.frontmatter_start_line + 1 + offset
+        else:
+            offset = _first_line_containing(term, doc.body_lines)
+            if offset is not None:
+                line = doc.body_start_line + offset
         if line is not None:
-            violations.append(
-                Violation(doc.rel_path, line, "V11", f"Denylisted term {term!r} found.")
-            )
+            violations.append(_denylist_violation(doc.rel_path, line, "V11", term))
+    return violations
+
+
+def _auxiliary_text_files(skill_dir: Path) -> list[Path]:
+    """Return the auxiliary text files V19 scans in ``skill_dir``, sorted by path.
+
+    These are the files with an extension in :data:`AUXILIARY_TEXT_SUFFIXES`,
+    at any depth, except the top-level ``SKILL.md`` (V11 covers it), anything
+    under the top-level ``external/`` (V17 forbids it outright) and anything
+    under a folder named in :data:`AUXILIARY_SKIPPED_DIRNAMES`.  Symlinked
+    folders are not followed, so a link cannot pull in text from elsewhere.
+    """
+    found: list[Path] = []
+    for current, dirnames, filenames in os.walk(skill_dir):
+        current_path = Path(current)
+        # Pruning ``dirnames`` in place is how ``os.walk`` is told not to descend.
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if dirname not in AUXILIARY_SKIPPED_DIRNAMES
+            and not (current_path == skill_dir and dirname == EXTERNAL_CONTENT_DIRNAME)
+        ]
+        for filename in filenames:
+            path = current_path / filename
+            if current_path == skill_dir and filename == SKILL_FILENAME:
+                continue
+            if path.suffix.lower() not in AUXILIARY_TEXT_SUFFIXES or not path.is_file():
+                continue
+            found.append(path)
+    return sorted(found)
+
+
+def check_auxiliary_denylist(doc: SkillDoc, repo_root: Path) -> list[Violation]:
+    """V19: the V11 denylist also holds for a skill's other text files.
+
+    Every file :func:`_auxiliary_text_files` returns is scanned with the terms
+    V11 uses for the same skill, so the ``compatibility`` declared in
+    ``SKILL.md`` exempts the same harness phrases here.  A file that is not
+    valid UTF-8 is treated as binary and skipped.
+
+    Args:
+        doc: The parsed ``SKILL.md`` of the skill, which supplies the folder and
+            the declared harnesses.
+        repo_root: Repository root, used to build relative paths for reports.
+
+    Returns:
+        One violation per file and term, at the first line the term is on,
+        ordered by file path and then by :data:`DENYLIST` order.
+    """
+    terms = _scanned_denylist_terms(doc)
+    violations = []
+    for path in _auxiliary_text_files(doc.directory):
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        lines = _text_lines(text)
+        rel_path = str(path.relative_to(repo_root))
+        for term in terms:
+            offset = _first_line_containing(term, lines)
+            if offset is not None:
+                violations.append(_denylist_violation(rel_path, offset + 1, "V19", term))
     return violations
 
 
@@ -1016,6 +1219,209 @@ def check_external_declaration(skill_dir: Path, repo_root: Path) -> list[Violati
     return violations
 
 
+#: Passages that several skills carry word for word, checked by V18.  Adding a
+#: shared passage is one entry here: ``SharedTextGroup.sections`` for the
+#: section under a heading, ``SharedTextGroup.files`` for whole files.  The
+#: table sits here rather than with the other conventions because building it
+#: validates each path with :func:`_relative_path_problems`.
+SHARED_TEXT_GROUPS: tuple[SharedTextGroup, ...] = (
+    SharedTextGroup.sections(
+        "version-state-section",
+        "## 版の状態の見分け方",
+        "version-start/SKILL.md",
+        "version-implement/SKILL.md",
+        "version-release/SKILL.md",
+    ),
+    SharedTextGroup.sections(
+        "handoff-section",
+        "## 申し送りの扱い",
+        "version-start/SKILL.md",
+        "version-implement/SKILL.md",
+        "version-release/SKILL.md",
+    ),
+    SharedTextGroup.files(
+        "audit-reference",
+        "skill-sync/references/audit.md",
+        "register-external-skill/references/audit.md",
+    ),
+    SharedTextGroup.files(
+        "contents-reference",
+        "skill-sync/references/contents.md",
+        "register-external-skill/references/contents.md",
+    ),
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class _SharedTextExcerpt:
+    """The text of one V18 target, ready for comparison.
+
+    Attributes:
+        lines: The lines compared, without trailing blank lines.
+        first_line: 1-indexed line number of ``lines[0]`` in the file.
+    """
+
+    lines: list[str]
+    first_line: int
+
+
+def _section_bounds(lines: Sequence[str], heading: str) -> tuple[list[int], int | None]:
+    """Locate the section that ``heading`` opens.
+
+    A line is a heading only outside fenced code blocks.  The section runs from
+    the heading line up to (not including) the next heading of the same or a
+    higher level, or to the end of the file.
+
+    Args:
+        lines: The file's lines.
+        heading: The full heading line; trailing whitespace on a file line is
+            ignored when matching it.
+
+    Returns:
+        The 0-indexed positions of every line matching ``heading``, and the end
+        (exclusive) of the section opened by the first of them, or ``None`` when
+        there is no match.
+    """
+    level = len(heading) - len(heading.lstrip("#"))
+    starts: list[int] = []
+    end: int | None = None
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        if fence is not None:
+            # A fence closes on a run of its own character, at least as long as
+            # the opening run, with nothing but whitespace after it.
+            closing = CODE_FENCE_PATTERN.match(line)
+            if (
+                closing
+                and closing.group(1)[0] == fence[0]
+                and len(closing.group(1)) >= len(fence)
+                and not line[closing.end() :].strip()
+            ):
+                fence = None
+            continue
+        opening = CODE_FENCE_PATTERN.match(line)
+        if opening:
+            fence = opening.group(1)
+            continue
+        match = HEADING_PATTERN.match(line)
+        if not match:
+            continue
+        if starts and end is None and len(match.group(1)) <= level:
+            end = index
+        if line.rstrip() == heading:
+            starts.append(index)
+    if not starts:
+        return starts, None
+    return starts, end if end is not None else len(lines)
+
+
+def _extract_shared_text(
+    repo_root: Path, group: SharedTextGroup, target: SharedTextTarget
+) -> tuple[_SharedTextExcerpt | None, Violation | None]:
+    """Read one V18 target, reporting why it cannot be compared when it cannot.
+
+    Returns:
+        The excerpt and ``None``, or ``None`` and the violation to report.
+    """
+
+    def problem(message: str) -> tuple[None, Violation]:
+        return None, Violation(target.label, None, "V18", f"Group {group.name!r}: {message}")
+
+    path = repo_root / SKILLS_DIRNAME / target.path
+    if not path.is_file():
+        return problem("the file is missing.")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return problem(f"the file is not valid UTF-8: {exc}")
+
+    lines = _text_lines(text)
+    first = 0
+    end = len(lines)
+    if target.heading is not None:
+        starts, section_end = _section_bounds(lines, target.heading)
+        if section_end is None:
+            return problem(f"the heading {target.heading!r} is not found outside code blocks.")
+        if len(starts) > 1:
+            numbers = ", ".join(str(start + 1) for start in starts)
+            return problem(
+                f"the heading {target.heading!r} appears more than once (lines {numbers})."
+            )
+        first, end = starts[0], section_end
+
+    excerpt = list(lines[first:end])
+    while excerpt and not excerpt[-1].strip():
+        excerpt.pop()
+    return _SharedTextExcerpt(excerpt, first + 1), None
+
+
+def _describe_line(excerpt: _SharedTextExcerpt, index: int) -> str:
+    """Return the line number and the quoted content of ``excerpt`` at ``index``."""
+    number = excerpt.first_line + index
+    if index < len(excerpt.lines):
+        return f"line {number} {excerpt.lines[index]!r}"
+    return f"line {number} <end of text>"
+
+
+def check_shared_text(
+    repo_root: Path, groups: Sequence[SharedTextGroup] = SHARED_TEXT_GROUPS
+) -> list[Violation]:
+    """V18: passages that claim to be the same text are identical.
+
+    For each group, every target is extracted (a whole file, or the section a
+    heading opens) and compared line by line with the first target that could
+    be extracted.  Line endings are normalised to LF and trailing blank lines
+    are dropped before the comparison.  A missing file, a missing heading and a
+    heading that appears twice are violations in their own right, so renaming
+    a file or a heading cannot quietly take a passage out of the check.
+
+    Args:
+        repo_root: Repository root (the directory containing ``skills/``).
+        groups: The groups to check, defaulting to :data:`SHARED_TEXT_GROUPS`.
+
+    Returns:
+        The violations in group order: for each group, the targets that could
+        not be read, then one violation per target that differs from the
+        reference, placed at its first differing line.
+    """
+    violations: list[Violation] = []
+    for group in groups:
+        excerpts: list[tuple[SharedTextTarget, _SharedTextExcerpt]] = []
+        for target in group.targets:
+            excerpt, violation = _extract_shared_text(repo_root, group, target)
+            if violation is not None:
+                violations.append(violation)
+            elif excerpt is not None:
+                excerpts.append((target, excerpt))
+        if not excerpts:
+            continue
+
+        reference_target, reference = excerpts[0]
+        for target, excerpt in excerpts[1:]:
+            if excerpt.lines == reference.lines:
+                continue
+            index = next(
+                (
+                    position
+                    for position, (left, right) in enumerate(
+                        zip(reference.lines, excerpt.lines, strict=False)
+                    )
+                    if left != right
+                ),
+                min(len(reference.lines), len(excerpt.lines)),
+            )
+            violations.append(
+                Violation(
+                    target.label,
+                    excerpt.first_line + index,
+                    "V18",
+                    f"Group {group.name!r}: {target.label} {_describe_line(excerpt, index)} "
+                    f"differs from {reference_target.label} {_describe_line(reference, index)}.",
+                )
+            )
+    return violations
+
+
 def check_manifest_drift(repo_root: Path) -> list[Violation]:
     """V13/V14: the committed manifests match what the generator produces.
 
@@ -1236,6 +1642,7 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
     violations.extend(check_version_marker(doc))
     violations.extend(check_usage_declaration(doc))
     violations.extend(check_denylist(doc))
+    violations.extend(check_auxiliary_denylist(doc, repo_root))
     violations.extend(check_openai_yaml(doc, repo_root))
     violations.extend(check_compatibility(doc))
     violations.extend(check_compatibility_preamble(doc))
@@ -1244,7 +1651,10 @@ def validate_skill(skill_dir: Path, repo_root: Path) -> list[Violation]:
 
 
 def validate_repository(
-    repo_root: Path, min_skills: int = 1, verify_manifests: bool = False
+    repo_root: Path,
+    min_skills: int = 1,
+    verify_manifests: bool = False,
+    verify_shared_text: bool = False,
 ) -> list[Violation]:
     """Validate every skill in the repository.
 
@@ -1262,11 +1672,15 @@ def validate_repository(
             test fixtures, for instance) has no reason to provide: neither a
             ``VERSION`` file nor either generated manifest. The CLI passes
             ``True``, so a real checkout is always fully checked.
+        verify_shared_text: Whether to also run ``V18`` with
+            :data:`SHARED_TEXT_GROUPS`.  Defaults to ``False`` for the same
+            reason: the groups name files of the real repository, which a bare
+            tree of skill folders does not have.  The CLI passes ``True``.
 
     Returns:
         All violations found across the repository, with any ``V00`` violation
-        first, then per-skill violations in skill-name order, then any manifest
-        violation.
+        first, then per-skill violations in skill-name order, then any ``V18``
+        violation, then any manifest violation.
     """
     skills_root = repo_root / SKILLS_DIRNAME
     skill_dirs = discover_skill_dirs(skills_root)
@@ -1287,6 +1701,11 @@ def validate_repository(
     # (and their violations reported) in a stable, deterministic order.
     for skill_dir in skill_dirs:
         violations.extend(validate_skill(skill_dir, repo_root))
+
+    # Shared passages span several skills, so they are compared once every
+    # skill has been checked on its own.
+    if verify_shared_text:
+        violations.extend(check_shared_text(repo_root))
 
     # The manifests describe the repository as a whole, so they are checked
     # after every skill and their violations are appended last.
@@ -1321,9 +1740,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parent.parent
-    # Run from a real checkout, so the generated manifests are always checked
-    # too: a stale manifest is served to users exactly as committed.
-    violations = validate_repository(repo_root, min_skills=args.min_skills, verify_manifests=True)
+    # Run from a real checkout, so the generated manifests and the shared
+    # passages are always checked too: a stale manifest is served to users
+    # exactly as committed, and a drifted copy is read by agents as written.
+    violations = validate_repository(
+        repo_root,
+        min_skills=args.min_skills,
+        verify_manifests=True,
+        verify_shared_text=True,
+    )
 
     for violation in violations:
         print(format_violation(violation))
