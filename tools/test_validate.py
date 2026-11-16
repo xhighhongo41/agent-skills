@@ -1,13 +1,14 @@
 """Tests for ``tools/validate.py``.
 
-Stage 2 of the project's TDD cycle: these tests are written against the
-*intended* behaviour of ``validate.py`` before the check bodies are
-implemented (they currently all raise ``NotImplementedError``). Every test
-below builds a synthetic skill folder under ``tmp_path`` and drives it
-through :func:`validate.validate_skill`, so no test touches the network,
-the user's home directory or this repository's real ``skills/`` folder.
+The tests pin the behaviour of every check in ``validate.py``. Each one
+builds a synthetic repository under ``tmp_path`` (skill folders, and for the
+repository-level checks the shared files or the manifests) and drives it
+through :func:`validate.validate_skill`, :func:`validate.validate_repository`
+or a single check function, so no test touches the network, the user's home
+directory or this repository's real ``skills/`` folder. The V18 tests pass
+their own table of groups instead of :data:`validate.SHARED_TEXT_GROUPS`.
 
-Each test name embeds the check identifier (``V00``..``V17``) it protects,
+Each test name embeds the check identifier (``V00``..``V19``) it protects,
 per the convention documented in ``validate.py``. For every check there is
 at least one "valid" test (a fully compliant skill does not trigger the
 check) and at least one "violation" test (breaking exactly one aspect of an
@@ -1583,6 +1584,550 @@ def test_v17_surfaces_through_validate_repository(tmp_path: Path) -> None:
     write_skill(tmp_path, extra_files={"external/ref-docs/a.md": "x"})
     violations = validate_repository(tmp_path, min_skills=1)
     assert [(v.check, v.path) for v in violations] == [("V17", EXTERNAL_DIR_RELPATH)]
+
+
+# --------------------------------------------------------------------------- #
+# V18: passages that claim to be the same text are identical
+# --------------------------------------------------------------------------- #
+
+V18_HEADING = "## 共有の節"
+
+
+def _write_skills_file(tmp_path: Path, rel_path: str, text: str) -> None:
+    """Write ``text`` to ``tmp_path/skills/<rel_path>``, creating parent folders."""
+    path = tmp_path / "skills" / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _files_group(*paths: str, name: str = "shared-file") -> Any:
+    """Return a one-group table comparing the whole files at ``paths``."""
+    return (validate.SharedTextGroup.files(name, *paths),)
+
+
+def _sections_group(*paths: str, heading: str = V18_HEADING, name: str = "shared-section") -> Any:
+    """Return a one-group table comparing the ``heading`` section of each file."""
+    return (validate.SharedTextGroup.sections(name, heading, *paths),)
+
+
+def _shared_text_violations(tmp_path: Path, groups: Any) -> list[Violation]:
+    """Run V18 alone against the repository at ``tmp_path`` with ``groups``."""
+    return validate.check_shared_text(tmp_path, groups)
+
+
+def _document(*, before: Sequence[str], section: Sequence[str], after: Sequence[str]) -> str:
+    """Join three runs of lines into one Markdown document ending in a newline."""
+    return "\n".join([*before, *section, *after]) + "\n"
+
+
+SHARED_SECTION = (
+    V18_HEADING,
+    "",
+    "共有される本文。",
+    "",
+    "### 下位の見出し",
+    "",
+    "下位の節の本文。",
+)
+
+
+def test_v18_identical_whole_files_is_valid(tmp_path: Path) -> None:
+    """Two byte-identical files registered as a whole-file group are clean."""
+    _write_skills_file(tmp_path, "a/references/x.md", "# 表題\n\n本文。\n")
+    _write_skills_file(tmp_path, "b/references/x.md", "# 表題\n\n本文。\n")
+    groups = _files_group("a/references/x.md", "b/references/x.md")
+    assert _shared_text_violations(tmp_path, groups) == []
+
+
+def test_v18_whole_files_differing_is_violation(tmp_path: Path) -> None:
+    """A changed line is reported with the group name, both line numbers and both lines."""
+    _write_skills_file(tmp_path, "a/references/x.md", "# 表題\n\n本文その一。\n末尾。\n")
+    _write_skills_file(tmp_path, "b/references/x.md", "# 表題\n\n本文その二。\n末尾。\n")
+    groups = _files_group("a/references/x.md", "b/references/x.md", name="reference-x")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [
+        ("V18", "skills/b/references/x.md", 3)
+    ]
+    message = violations[0].message
+    assert "reference-x" in message
+    assert "skills/a/references/x.md" in message
+    assert "line 3" in message
+    assert repr("本文その一。") in message
+    assert repr("本文その二。") in message
+
+
+def test_v18_identical_sections_at_different_positions_is_valid(tmp_path: Path) -> None:
+    """Only the section is compared: the text around it and its position may differ."""
+    _write_skills_file(
+        tmp_path,
+        "a/SKILL.md",
+        _document(before=["# a", "", "前置き。", ""], section=SHARED_SECTION, after=["", "## 後"]),
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=["# b", ""], section=SHARED_SECTION, after=["", "## 別の後", "違う。"]),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    assert _shared_text_violations(tmp_path, groups) == []
+
+
+def test_v18_sections_differing_is_violation(tmp_path: Path) -> None:
+    """Line numbers in the report are file line numbers, one per target."""
+    changed = list(SHARED_SECTION)
+    changed[2] = "書き換えた本文。"
+    _write_skills_file(
+        tmp_path,
+        "a/SKILL.md",
+        _document(before=["# a", "", "前置き。", ""], section=SHARED_SECTION, after=[]),
+    )
+    _write_skills_file(
+        tmp_path, "b/SKILL.md", _document(before=["# b", ""], section=changed, after=[])
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md", name="section-group")
+    violations = _shared_text_violations(tmp_path, groups)
+    # The changed line is the section's third line: line 7 in a (four lines of
+    # preamble) and line 5 in b (two lines of preamble).
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", 5)]
+    message = violations[0].message
+    assert "section-group" in message
+    assert "line 7" in message
+    assert "line 5" in message
+    assert repr("共有される本文。") in message
+    assert repr("書き換えた本文。") in message
+
+
+def test_v18_section_cut_short_is_violation(tmp_path: Path) -> None:
+    """A section that is a strict prefix of the other still fails, at its end."""
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(
+        tmp_path, "b/SKILL.md", _document(before=[], section=SHARED_SECTION[:3], after=[])
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", 4)]
+    assert repr("") in violations[0].message
+
+
+def test_v18_every_differing_target_is_reported(tmp_path: Path) -> None:
+    """With three targets, each one that differs from the first is reported."""
+    _write_skills_file(tmp_path, "a/x.md", "同じ。\n")
+    _write_skills_file(tmp_path, "b/x.md", "違う一。\n")
+    _write_skills_file(tmp_path, "c/x.md", "違う二。\n")
+    groups = _files_group("a/x.md", "b/x.md", "c/x.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [
+        ("V18", "skills/b/x.md", 1),
+        ("V18", "skills/c/x.md", 1),
+    ]
+
+
+def test_v18_line_endings_and_trailing_blank_lines_are_ignored_is_valid(tmp_path: Path) -> None:
+    """CRLF line endings and trailing blank lines do not count as differences."""
+    _write_skills_file(tmp_path, "a/x.md", "一行目。\n二行目。\n")
+    (tmp_path / "skills" / "b").mkdir(parents=True)
+    (tmp_path / "skills" / "b" / "x.md").write_bytes("一行目。\r\n二行目。\r\n\r\n\r\n".encode())
+    groups = _files_group("a/x.md", "b/x.md")
+    assert _shared_text_violations(tmp_path, groups) == []
+
+
+def test_v18_trailing_blank_lines_before_the_next_heading_are_ignored_is_valid(
+    tmp_path: Path,
+) -> None:
+    """A section followed by more blank lines in one file than the other is still equal."""
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=["", "## 次"])
+    )
+    _write_skills_file(
+        tmp_path, "b/SKILL.md", _document(before=[], section=SHARED_SECTION, after=["## 次"])
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    assert _shared_text_violations(tmp_path, groups) == []
+
+
+def test_v18_section_includes_lower_level_headings_is_violation(tmp_path: Path) -> None:
+    """A difference under a ``###`` subheading belongs to the ``##`` section."""
+    changed = list(SHARED_SECTION)
+    changed[-1] = "下位の節の別の本文。"
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(tmp_path, "b/SKILL.md", _document(before=[], section=changed, after=[]))
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", 7)]
+
+
+@pytest.mark.parametrize("next_heading", ["## 次の節", "# 上位の見出し"], ids=["same", "higher"])
+def test_v18_section_ends_at_same_or_higher_level_heading_is_valid(
+    tmp_path: Path, next_heading: str
+) -> None:
+    """Text after the next heading of the same or a higher level is not compared."""
+    _write_skills_file(
+        tmp_path,
+        "a/SKILL.md",
+        _document(before=[], section=SHARED_SECTION, after=[next_heading, "a だけの本文。"]),
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=[], section=SHARED_SECTION, after=[next_heading, "b だけの本文。"]),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    assert _shared_text_violations(tmp_path, groups) == []
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~"], ids=["backticks", "tildes"])
+def test_v18_hash_line_inside_code_block_does_not_end_the_section_is_violation(
+    tmp_path: Path, fence: str
+) -> None:
+    """A ``#`` line in a code block is not a heading, so text after it is still compared."""
+    code_block = [fence, "## コード中の行", fence]
+    _write_skills_file(
+        tmp_path,
+        "a/SKILL.md",
+        _document(before=[], section=[*SHARED_SECTION, *code_block, "後続の本文。"], after=[]),
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=[], section=[*SHARED_SECTION, *code_block, "別の後続。"], after=[]),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", 11)]
+
+
+def test_v18_heading_inside_code_block_is_not_found_is_violation(tmp_path: Path) -> None:
+    """The heading text quoted inside a code block does not count as the heading."""
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=["```"], section=SHARED_SECTION, after=["```"]),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", None)]
+    assert V18_HEADING in violations[0].message
+
+
+def test_v18_missing_file_is_violation(tmp_path: Path) -> None:
+    """A registered file that does not exist is reported rather than skipped."""
+    _write_skills_file(tmp_path, "a/x.md", "本文。\n")
+    groups = _files_group("a/x.md", "b/x.md", name="renamed-file")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/x.md", None)]
+    assert "renamed-file" in violations[0].message
+
+
+def test_v18_missing_heading_is_violation(tmp_path: Path) -> None:
+    """A registered heading that is absent (e.g. renamed) is reported rather than skipped."""
+    renamed = [V18_HEADING + "(改題)", *SHARED_SECTION[1:]]
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(tmp_path, "b/SKILL.md", _document(before=[], section=renamed, after=[]))
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md", name="renamed-heading")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", None)]
+    assert "renamed-heading" in violations[0].message
+    assert V18_HEADING in violations[0].message
+
+
+def test_v18_heading_appearing_twice_is_violation(tmp_path: Path) -> None:
+    """A heading that occurs twice is ambiguous, so it is reported instead of guessed."""
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=[], section=SHARED_SECTION, after=list(SHARED_SECTION)),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path) for v in violations] == [("V18", "skills/b/SKILL.md")]
+
+
+def test_v18_lower_level_heading_with_the_same_text_is_not_the_section(tmp_path: Path) -> None:
+    """``### 共有の節`` does not match the registered ``## 共有の節``."""
+    _write_skills_file(
+        tmp_path, "a/SKILL.md", _document(before=[], section=SHARED_SECTION, after=[])
+    )
+    _write_skills_file(
+        tmp_path,
+        "b/SKILL.md",
+        _document(before=[], section=["#" + V18_HEADING, *SHARED_SECTION[1:]], after=[]),
+    )
+    groups = _sections_group("a/SKILL.md", "b/SKILL.md")
+    violations = _shared_text_violations(tmp_path, groups)
+    assert [(v.check, v.path, v.line) for v in violations] == [("V18", "skills/b/SKILL.md", None)]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: validate.SharedTextGroup.files("one", "a/x.md"),
+        lambda: validate.SharedTextGroup.sections("one", V18_HEADING, "a/SKILL.md"),
+        lambda: validate.SharedTextGroup.sections("bad", "共有の節", "a/x.md", "b/x.md"),
+        lambda: validate.SharedTextGroup.files("bad", "/abs/x.md", "b/x.md"),
+        lambda: validate.SharedTextGroup.files("bad", "a/../x.md", "b/x.md"),
+    ],
+    ids=["one-file", "one-section", "not-a-heading", "absolute-path", "parent-part"],
+)
+def test_v18_malformed_group_is_rejected(build: Any) -> None:
+    """A table entry that could never be checked is refused when it is built."""
+    with pytest.raises(ValueError, match="SharedText"):
+        build()
+
+
+def test_v18_registered_groups_cover_the_shared_passages() -> None:
+    """The default table registers the four passages the skills share."""
+    version_skills = (
+        "version-start/SKILL.md",
+        "version-implement/SKILL.md",
+        "version-release/SKILL.md",
+    )
+    expected = {
+        frozenset(("## 版の状態の見分け方", path) for path in version_skills),
+        frozenset(("## 申し送りの扱い", path) for path in version_skills),
+        frozenset(
+            (None, f"{skill}/references/audit.md")
+            for skill in ("skill-sync", "register-external-skill")
+        ),
+        frozenset(
+            (None, f"{skill}/references/contents.md")
+            for skill in ("skill-sync", "register-external-skill")
+        ),
+    }
+    registered = {
+        frozenset((target.heading, target.path) for target in group.targets)
+        for group in validate.SHARED_TEXT_GROUPS
+    }
+    assert expected <= registered
+    names = [group.name for group in validate.SHARED_TEXT_GROUPS]
+    assert len(set(names)) == len(names)
+
+
+def test_v18_check_defaults_to_the_registered_groups(tmp_path: Path) -> None:
+    """Called without a table, V18 checks :data:`validate.SHARED_TEXT_GROUPS`."""
+    violations = validate.check_shared_text(tmp_path)
+    expected_paths = {
+        f"skills/{target.path}" for group in validate.SHARED_TEXT_GROUPS for target in group.targets
+    }
+    assert {v.path for v in violations} == expected_paths
+    assert _check_ids(violations) == {"V18"}
+
+
+def test_v18_is_off_in_validate_repository_by_default(tmp_path: Path) -> None:
+    """Like the manifest checks, V18 is opt-in for library callers."""
+    write_skill(tmp_path, name="alpha-skill")
+    assert validate_repository(tmp_path, min_skills=1) == []
+
+
+def test_v18_surfaces_through_validate_repository(tmp_path: Path) -> None:
+    """With the flag on, V18 runs after the per-skill checks and before the manifests."""
+    write_skill(tmp_path, name="alpha-skill", license_value="Apache-2.0")
+    write_project_version(tmp_path)
+    manifests.write_manifests(tmp_path)
+    (tmp_path / manifests.INDEX_RELPATH).unlink()
+    violations = validate_repository(
+        tmp_path, min_skills=1, verify_manifests=True, verify_shared_text=True
+    )
+    checks = [violation.check for violation in violations]
+    assert "V18" in checks
+    assert checks.index("V06") < checks.index("V18")
+    assert checks[-1] == "V13"
+    assert max(i for i, check in enumerate(checks) if check == "V18") < checks.index("V13")
+
+
+# --------------------------------------------------------------------------- #
+# V19: no denylisted term in a skill's files other than SKILL.md
+# --------------------------------------------------------------------------- #
+
+V19_RELPATH = f"skills/{DEFAULT_NAME}/references/notes.md"
+
+
+def _v19(violations: list[Violation]) -> list[tuple[str, int | None]]:
+    """Return ``(path, line)`` for each V19 violation, in report order."""
+    return [(v.path, v.line) for v in violations if v.check == "V19"]
+
+
+def test_v19_clean_auxiliary_files_is_valid(tmp_path: Path) -> None:
+    """Auxiliary files free of denylisted terms do not trigger V19."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={
+            "references/notes.md": "# 補足\n\nCLAUDE.md と AGENTS.md を参照する。\n",
+            "scripts/run.sh": "#!/bin/sh\necho ok\n",
+        },
+    )
+    assert _v19(validate_skill(skill_dir, tmp_path)) == []
+
+
+def test_v19_denylisted_term_in_auxiliary_file_is_violation(tmp_path: Path) -> None:
+    """The report names the file and the line the term is on."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={"references/notes.md": "# 補足\n\ncode-implementer を呼ぶ。\n"},
+    )
+    violations = validate_skill(skill_dir, tmp_path)
+    assert _v19(violations) == [(V19_RELPATH, 3)]
+    message = next(v.message for v in violations if v.check == "V19")
+    assert "code-implementer" in message
+
+
+@pytest.mark.parametrize("extension", [".md", ".json", ".yaml", ".yml", ".txt", ".py", ".sh"])
+def test_v19_every_scanned_extension_is_violation(tmp_path: Path, extension: str) -> None:
+    """Every text extension in the scanned set is checked."""
+    rel = f"scripts/data{extension}"
+    skill_dir = write_skill(tmp_path, extra_files={rel: "/Users/example/project\n"})
+    assert _v19(validate_skill(skill_dir, tmp_path)) == [(f"skills/{DEFAULT_NAME}/{rel}", 1)]
+
+
+def test_v19_openai_yaml_is_scanned_is_violation(tmp_path: Path) -> None:
+    """``agents/openai.yaml`` is an auxiliary file like any other."""
+    yaml_text = _default_openai_yaml(DEFAULT_NAME) + "# Claude用の設定\n"
+    skill_dir = write_skill(tmp_path, openai_yaml_content=yaml_text)
+    violations = validate_skill(skill_dir, tmp_path)
+    assert _v19(violations) == [(f"skills/{DEFAULT_NAME}/agents/openai.yaml", 5)]
+    assert "V12" not in _check_ids(violations)
+
+
+def test_v19_nested_folders_are_scanned_is_violation(tmp_path: Path) -> None:
+    """Files in nested sub-folders are scanned too, including a nested ``SKILL.md``."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={
+            "scripts/lib/helper.py": "# Explore を使う\n",
+            "references/inner/SKILL.md": "test-runner\n",
+        },
+    )
+    assert sorted(_v19(validate_skill(skill_dir, tmp_path))) == [
+        (f"skills/{DEFAULT_NAME}/references/inner/SKILL.md", 1),
+        (f"skills/{DEFAULT_NAME}/scripts/lib/helper.py", 1),
+    ]
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    ["references/page.html", "data/table.csv", "scripts/run", "references/notes.MD.bak"],
+    ids=["html", "csv", "no-extension", "backup"],
+)
+def test_v19_unscanned_extension_is_ignored(tmp_path: Path, rel_path: str) -> None:
+    """Files outside the scanned extensions are not read at all."""
+    skill_dir = write_skill(tmp_path, extra_files={rel_path: "code-implementer\n"})
+    assert _v19(validate_skill(skill_dir, tmp_path)) == []
+
+
+def test_v19_skill_md_is_left_to_v11(tmp_path: Path) -> None:
+    """The top-level ``SKILL.md`` is V11's job, so it is not reported twice."""
+    skill_dir = write_skill(tmp_path, denylist_word="code-implementer を呼ぶ。")
+    checks = _check_ids(validate_skill(skill_dir, tmp_path))
+    assert "V11" in checks
+    assert "V19" not in checks
+
+
+def test_v19_external_dir_is_ignored(tmp_path: Path) -> None:
+    """Fetched ``external/`` content is V17's concern, not V19's."""
+    skill_dir = write_skill(tmp_path, extra_files={"external/ref-docs/a.md": "code-implementer\n"})
+    checks = _check_ids(validate_skill(skill_dir, tmp_path))
+    assert "V17" in checks
+    assert "V19" not in checks
+
+
+@pytest.mark.parametrize(
+    "cache_dir", ["__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"]
+)
+def test_v19_cache_dirs_are_ignored(tmp_path: Path, cache_dir: str) -> None:
+    """Local tool caches, which may record absolute paths, are not scanned."""
+    skill_dir = write_skill(
+        tmp_path, extra_files={f"scripts/{cache_dir}/state.json": '{"p": "/Users/x"}\n'}
+    )
+    assert _v19(validate_skill(skill_dir, tmp_path)) == []
+
+
+def test_v19_non_utf8_file_is_ignored(tmp_path: Path) -> None:
+    """A file that is not UTF-8 text is treated as binary and skipped."""
+    skill_dir = write_skill(tmp_path)
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "blob.txt").write_bytes(b"\xff\xfe/Users/x\n")
+    assert _v19(validate_skill(skill_dir, tmp_path)) == []
+
+
+def test_v19_declared_harness_phrase_is_valid(tmp_path: Path) -> None:
+    """The ``compatibility`` exemption of V11 applies to auxiliary files as well."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        extra_files={"references/notes.md": "OpenCode用の手順。\n"},
+    )
+    assert _v19(validate_skill(skill_dir, tmp_path)) == []
+
+
+def test_v19_undeclared_harness_phrase_is_violation(tmp_path: Path) -> None:
+    """The exemption stays per harness in auxiliary files."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        extra_files={"references/notes.md": "前置き。\nClaude用の手順。\n"},
+    )
+    assert _v19(validate_skill(skill_dir, tmp_path)) == [(V19_RELPATH, 2)]
+
+
+def test_v19_harness_phrase_without_compatibility_is_violation(tmp_path: Path) -> None:
+    """A skill declaring nothing exempts nothing in its auxiliary files."""
+    skill_dir = write_skill(tmp_path, extra_files={"references/notes.md": "OpenCode用の手順。\n"})
+    assert _v19(validate_skill(skill_dir, tmp_path)) == [(V19_RELPATH, 1)]
+
+
+def test_v19_subagent_name_with_compatibility_is_violation(tmp_path: Path) -> None:
+    """``compatibility`` never exempts a subagent proper name in auxiliary files."""
+    skill_dir = write_skill(
+        tmp_path,
+        compatibility="opencode",
+        description=_harness_description("OpenCode"),
+        extra_files={"references/notes.md": "doc-reader を呼ぶ。\n"},
+    )
+    assert _v19(validate_skill(skill_dir, tmp_path)) == [(V19_RELPATH, 1)]
+
+
+def test_v19_each_term_is_reported_once_per_file_at_its_first_line(tmp_path: Path) -> None:
+    """Like V11, one violation per term and file, at the first line it appears on."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={"references/notes.md": "a\ntest-runner\ntest-runner\n/home/x\n"},
+    )
+    violations = [v for v in validate_skill(skill_dir, tmp_path) if v.check == "V19"]
+    assert sorted((v.line, v.message) for v in violations) == [
+        (2, "Denylisted term 'test-runner' found."),
+        (4, "Denylisted term '/home/' found."),
+    ]
+
+
+def test_v19_line_numbers_count_crlf_lines(tmp_path: Path) -> None:
+    """CRLF line endings do not shift the reported line number."""
+    skill_dir = write_skill(tmp_path)
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "notes.md").write_bytes(b"one\r\ntwo\r\nExplore\r\n")
+    assert _v19(validate_skill(skill_dir, tmp_path)) == [(V19_RELPATH, 3)]
+
+
+def test_v19_is_reported_before_v17(tmp_path: Path) -> None:
+    """V19 runs among the per-skill checks, ahead of V17 which stays last."""
+    skill_dir = write_skill(
+        tmp_path,
+        extra_files={"references/notes.md": "Explore\n", "external/ref-docs/a.md": "x"},
+    )
+    checks = [v.check for v in validate_skill(skill_dir, tmp_path)]
+    assert checks == ["V19", "V17"]
 
 
 # --------------------------------------------------------------------------- #

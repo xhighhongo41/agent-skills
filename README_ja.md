@@ -16,7 +16,7 @@ English: **[README.md](README.md)**
 | エージェント | スキルの配置先 |
 |---|---|
 | [Claude Code](https://code.claude.com) | `~/.claude/skills/`（Windows: `%USERPROFILE%\.claude\skills\`） |
-| [OpenAI Codex](https://learn.chatgpt.com/docs/build-skills) | `~/.codex/skills/`（`$CODEX_HOME` 設定時はその配下） |
+| [OpenAI Codex](https://learn.chatgpt.com/docs/build-skills) | `~/.codex/skills/`（`$CODEX_HOME` 設定時はその配下）。Codex は `~/.agents/skills/` も読みます（OpenCode も読む場所です） |
 | [OpenCode](https://opencode.ai) | `~/.config/opencode/skills/`（Windows も同じパス） |
 
 Agent Skills 形式を読む他のツールでも動作するはずです。
@@ -72,7 +72,7 @@ Agent Skills 形式を読む他のツールでも動作するはずです。
 | **A** エージェント自身にやらせる | 全部 | もう一度頼む | `/python-coding` |
 | **B** 手動でコピー | 全部 | もう一度コピー、または `skill-sync` | `/python-coding` |
 | **C** Codex の `skill-installer` | OpenAI Codex | 入れ直す（バージョン比較機構が無い） | `/python-coding` |
-| **D** OpenCode の `skills.urls` | OpenCode | 自動（版が変わったとき） | `/python-coding` |
+| **D** OpenCode の `skills` の設定 | OpenCode | 自動（版が変わったとき） | `/python-coding` |
 | **E** Claude Code の marketplace | Claude Code | `/plugin marketplace update` | `/agent-skills:python-coding` |
 
 **D** と **E** は全スキルが一度に入ります。**A**・**B**・**C** は1スキルずつです。
@@ -131,26 +131,19 @@ https://github.com/xhighhongo41/agent-skills/tree/main/skills/python-coding
 のスキルを入れて
 ```
 
-### 方法D — OpenCode の `skills.urls` を使う
+### 方法D — OpenCode の `skills` の設定を使う
 
 OpenCode は本リポジトリから直接スキルを取得し、最新に保つことができます。
-`opencode.json` にマニフェストのあるディレクトリを指定してください。
-
-```json
-{
-  "skills": {
-    "urls": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
-  }
-}
-```
-
-OpenCode v2（別バイナリの `opencode2`）はフラットな配列で書きます。
+`opencode.json` の `skills` の配列に、マニフェストのあるディレクトリを加えてください。
 
 ```json
 {
   "skills": ["https://raw.githubusercontent.com/xhighhongo41/agent-skills/main/skills"]
 }
 ```
+
+この書き方は OpenCode 1.x と 2.x のどちらでも使えます。以前の設定では `{"skills": {"urls": [...]}}` の形で
+URL を書いていました。OpenCode はこの形も受け付けて配列の形に変換するので、既存の設定はそのまま動きます。
 
 OpenCode はそのディレクトリの `index.json` を読み、そこに載っているスキルをすべて
 ダウンロードします。スキルの版が変わると自動的に取り直します。
@@ -256,6 +249,10 @@ OpenCode は Claude Code のスキルディレクトリをそのまま読みま�
 他のエージェントのスキルを代わりに更新することはありません。別のエージェントを更新したいときは、
 そのエージェント上で `skill-sync` を実行してください。
 
+`skill-sync` は既定では、本リポジトリの `index.json` と比べます。OpenCode 上では、代わりに `skills` の設定にある URL を使います。
+フォークから導入している場合は、`skill-sync.json` に `"source"` を足し、フォークの `index.json`（またはそれを置くディレクトリ）の URL を書いてください。
+`skill-sync` は、この URL をどちらよりも優先して使います。
+
 **外部の参照物。** スキルは他者のリポジトリから読む資料を、フォルダ内の `external.json` で宣言できます。
 `japanese-writing` と `english-writing` はそれぞれ2つのスキルを宣言しています（[謝辞](#謝辞)に挙げています）。
 この資料は本リポジトリには含まれていません。`skill-sync` は、そうしたスキルを導入・更新するときに、宣言されたリポジトリをそれぞれ取得し、
@@ -264,7 +261,7 @@ OpenCode は Claude Code のスキルディレクトリをそのまま読みま�
 以後の実行では、`skill-sync` が取得元ごとに変更を確かめ、取得しているファイルが変わっていれば更新を提示します。
 上流でファイルが消えても、手元のファイルは消しません。その旨を知らせ、削除するかを尋ねます。
 
-参照物を置けるのは、エージェント自身のスキル置き場にある複製だけです。OpenCode の `skills.urls`（方法 **D**）や
+参照物を置けるのは、エージェント自身のスキル置き場にある複製だけです。OpenCode の `skills` の設定（方法 **D**）や
 Claude Code の marketplace（方法 **E**）で入れた複製は、`skill-sync` が書き込まない場所にあります。
 その場合は、`skill-sync` がエージェント自身のスキル置き場へもう1つ導入することを勧め、参照物はその複製に入ります。
 
@@ -312,7 +309,8 @@ metadata:
 
 | バージョン | 変更内容 |
 |---|---|
-| **3.0.0** | 文書を書くための新規スキル2件と、それに必要なものを取得できるようになった `skill-sync`。`japanese-writing` と `english-writing` は、他者が公開しているスキルを参照物として読みながら、段階を分けて文書を書いたり直したりします（日本語は natural-japanese と yomiyasu、英語は technical-documentation と humanizer）。参照物は本リポジトリには同梱していません。スキルが `external.json` で参照物を宣言し、`skill-sync` 2.0.0 が、宣言されたファイルを導入時に作者のリポジトリから取得して、スキルのフォルダ内の `external/` に置き、以後の更新にも追随します。`skill-sync` 2.0.0 はまた、他者のリポジトリから取り込んだスキルの全ファイルを比べるようになり（従来は `SKILL.md` の本文だけでした）、新しく入るファイルと変わったファイルを配置の前に監査します。監査は何も実行せずに読み、所見を「有害の疑い」「この環境では動かない見込み」「判断の材料」に分け、有害の疑いがある対象は名前を挙げない限り見送ります。`register-external-skill` 1.1.0 は同じ監査を行い、スキルのファイルのチェックサムの一覧を記録します。`remove-skill` 1.1.0 はスキルのフォルダの内訳を示し、取得した参照物を含めてすべて削除します。全スキルの本文は、規定の意味を変えずに、`japanese-writing` で読みやすく直しました（9件はそのためにパッチバージョンを上げています）。更新する場合は、先に `skill-sync` を更新し、エージェントを再起動してから、もう一度実行して参照物を取得してください。収録は14件になりました。 |
+| **3.1.0** | 全14スキルを改訂しました。新規のスキルはありません。`skill-sync` 2.1.0 は `~/.agents/skills/` も走査します。Codex の現行の文書が利用者のスキル置き場として挙げる場所で、OpenCode も読みます。書き込み先は、Codex が今も読む `~/.codex/skills/` のままです。OpenCode の `skills` の配列と旧形式の `skills.urls` の両方を読み、フォークから導入するときは `skill-sync.json` の `"source"` から配布元を決めます。上流の構成が変わった参照物は取得を見送り、その理由を知らせます。`japanese-writing` と `english-writing` 1.1.0 は、参照物が想定と合わなくなったときに止まって尋ねます。`python-coding` 1.2.0 は安全の規定をプロジェクトの規約より優先し、docstring の書き方の節を足しました（プロジェクトに定めが無ければ Google 形式）。`test-driven-development` 1.1.0 は、独立した判定役2者がともにテスト側の誤りと判定したときだけテストを直します。実装の後に足すテストは、実装をわざと壊して失敗することを先に確かめます。版管理系の3スキル、`council`、`project-start`、`plugin-update` の2スキルは、3.0.0 で本文を改良したときに見つかった規定の隙間を埋めました。主に、中断からの再開、アカウントの切り替え、報告の内容です。 |
+| 3.0.0 | 文書を書くための新規スキル2件と、それに必要なものを取得できるようになった `skill-sync`。`japanese-writing` と `english-writing` は、他者が公開しているスキルを参照物として読みながら、段階を分けて文書を書いたり直したりします（日本語は natural-japanese と yomiyasu、英語は technical-documentation と humanizer）。参照物は本リポジトリには同梱していません。スキルが `external.json` で参照物を宣言し、`skill-sync` 2.0.0 が、宣言されたファイルを導入時に作者のリポジトリから取得して、スキルのフォルダ内の `external/` に置き、以後の更新にも追随します。`skill-sync` 2.0.0 はまた、他者のリポジトリから取り込んだスキルの全ファイルを比べるようになり（従来は `SKILL.md` の本文だけでした）、新しく入るファイルと変わったファイルを配置の前に監査します。監査は何も実行せずに読み、所見を「有害の疑い」「この環境では動かない見込み」「判断の材料」に分け、有害の疑いがある対象は名前を挙げない限り見送ります。`register-external-skill` 1.1.0 は同じ監査を行い、スキルのファイルのチェックサムの一覧を記録します。`remove-skill` 1.1.0 はスキルのフォルダの内訳を示し、取得した参照物を含めてすべて削除します。全スキルの本文は、規定の意味を変えずに、`japanese-writing` で読みやすく直しました（9件はそのためにパッチバージョンを上げています）。更新する場合は、先に `skill-sync` を更新し、エージェントを再起動してから、もう一度実行して参照物を取得してください。収録は14件になりました。 |
 | 2.1.0 | `council` 1.3.0 は時間の浪費を減らし、意見の独立性を高めました。ステージ1の後に、全員が一致した論点を司会がその場で確定し（各意見書の細部の良いところも統合）、議論の残りが無ければそこで終えます。司会が疑う一致は議論に残せます。相互レビューは意見書×レビュアーごとの別ファイルになり、他のレビュアーのレビューが目に入りません。参加者は司会と異なるモデルから、できれば開発元の異なるものを選び、制御不能や規定違反の参加者は別のモデルで補充します。1回の合議のファイル（意見書・レビュー・一致事項・決定・資料）は議題ごとのフォルダにまとまりました。継続手段の表は OpenCode 1.x（`task` / `task_id`）と 2.x（`subagent` / `sessionID`）の両方に対応します。 |
 | 2.0.0 | 新規スキル3件。`project-start` は新規プロジェクトの立ち上げを一通り行います。ディレクトリがクローンかローカル作成か、ホスティング CLI のアカウントとコミット識別子がリポジトリの所有者に合っているか、進行根幹ファイルと内部資料置き場、エージェントの固有指示ファイル、ライセンス、`.gitignore`、初回コミットと push までを、各手順で現状を調べてから不足だけ行うので、再実行しても安全です。`register-external-skill` は他者のリポジトリのスキルを実行中のエージェントに取り込み、frontmatter だけを補って導入元を `metadata` に記録します。`remove-skill` は確認を得てからスキルを削除し、`skill-sync.json` を整合させます。`skill-sync` 1.5.0 は取り込んだ外部由来スキルを導入元と突き合わせ、版があれば版で、無ければ本文の要約値で更新を判定します（一覧に「由来」列が加わり、8種の状態は変わりません）。版管理系3スキルは、申し送りを Critical / Recommended / Optional の3段階に分けて1つの申し送り文書で管理し、版の着手時には Critical だけ尋ね、進行文書には版ごとに短い記載を1つだけ置いて各フェーズが更新するようになりました。収録は12件になりました。 |
 | 1.9.0 | `skill-sync` が、エージェントごとに必要なスキルと不要なスキルを記憶するようになりました。記憶先は、実行したエージェントのコンフィグディレクトリ直下の小さな `skill-sync.json` で（エージェント本体の設定ファイルには書きません）、不要と記したスキルの導入を毎回尋ねられることがなくなります。必要と記したのに未導入のスキルは導入するかを確認し、不要と記したのに導入済みのスキルは一覧に出すだけで、削除も、名指ししない限り更新もしません。初回は現在の導入状況から初期値を提案し、確認後に1回で書きます。設定に無いスキルは同じ形で尋ね、読めない設定ファイルは知らせるだけで上書きしません。8種の状態は変わらず、設定は一覧の列として示します。 |

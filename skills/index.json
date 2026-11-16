@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "council",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "compatibility": "opencode",
       "files": [
         "SKILL.md",
@@ -11,7 +11,7 @@
     },
     {
       "name": "english-writing",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml",
@@ -20,7 +20,7 @@
     },
     {
       "name": "japanese-writing",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml",
@@ -29,7 +29,7 @@
     },
     {
       "name": "plugin-update-apply",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "compatibility": "opencode",
       "files": [
         "SKILL.md",
@@ -38,7 +38,7 @@
     },
     {
       "name": "plugin-update-check",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "compatibility": "opencode",
       "files": [
         "SKILL.md",
@@ -47,7 +47,7 @@
     },
     {
       "name": "project-start",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -55,7 +55,7 @@
     },
     {
       "name": "python-coding",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -63,7 +63,7 @@
     },
     {
       "name": "register-external-skill",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml",
@@ -73,7 +73,7 @@
     },
     {
       "name": "remove-skill",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -81,7 +81,7 @@
     },
     {
       "name": "skill-sync",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml",
@@ -92,7 +92,7 @@
     },
     {
       "name": "test-driven-development",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -100,7 +100,7 @@
     },
     {
       "name": "version-implement",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -108,7 +108,7 @@
     },
     {
       "name": "version-release",
-      "version": "1.4.1",
+      "version": "1.5.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
@@ -116,7 +116,7 @@
     },
     {
       "name": "version-start",
-      "version": "1.5.1",
+      "version": "1.6.0",
       "files": [
         "SKILL.md",
         "agents/openai.yaml"
